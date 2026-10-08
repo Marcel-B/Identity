@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Identity.Server/Identity.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Identity.Server.Tests/Identity.Server.Tests.csproj" />
+  </Folder>
+</Solution>

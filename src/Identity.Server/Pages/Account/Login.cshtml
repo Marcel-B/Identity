@@ -1,0 +1,39 @@
+@page
+@model LoginModel
+@{
+    ViewData["Title"] = "Anmelden";
+}
+
+<form method="post">
+    <input type="hidden" asp-for="ReturnUrl" />
+
+    @if (Model.ErrorMessage is not null)
+    {
+        <p class="error" role="alert">@Model.ErrorMessage</p>
+    }
+
+    <div class="field">
+        <label asp-for="UserName">Benutzername</label>
+        <input asp-for="UserName" type="text" autocomplete="username" autofocus />
+    </div>
+    <div class="field">
+        <label asp-for="Password">Passwort</label>
+        <input asp-for="Password" type="password" autocomplete="current-password" />
+    </div>
+    <label class="checkbox"><input asp-for="RememberMe" /> Angemeldet bleiben</label>
+
+    <button type="submit">Anmelden</button>
+</form>
+
+@if (Model.DemoUsers.Count > 0)
+{
+    <div class="hint">
+        Testbenutzer (nur Development):
+        <ul>
+            @foreach (var user in Model.DemoUsers)
+            {
+                <li><code>@user.UserName</code> / <code>@user.Password</code> (@string.Join(", ", user.Roles))</li>
+            }
+        </ul>
+    </div>
+}
