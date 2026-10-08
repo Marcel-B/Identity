@@ -27,8 +27,8 @@ public sealed class DiscoveryTests(IdentityServerFactory factory) : IClassFixtur
         var client = factory.CreateClient(new() { AllowAutoRedirect = false });
 
         var response = await client.GetAsync(
-            "/connect/authorize?client_id=mfe-bff&response_type=code&scope=openid%20roles" +
-            "&redirect_uri=http%3A%2F%2Flocalhost%3A5000%2Fsignin-oidc" +
+            "/connect/authorize?client_id=mfe-vue-host&response_type=code&scope=openid%20roles" +
+            "&redirect_uri=http%3A%2F%2Flocalhost%3A5010%2Fsignin-oidc" +
             "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);

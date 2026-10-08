@@ -17,16 +17,19 @@ dotnet run --project src/Identity.Server --launch-profile http
 
 Der Server läuft auf http://localhost:5001, das Discovery-Dokument liegt unter http://localhost:5001/.well-known/openid-configuration.
 
-In Development legt `appsettings.Development.json` zwei Testbenutzer und den Client des BFF an:
+In Development legt `appsettings.Development.json` zwei Testbenutzer und je einen Client für das Vue- und das React-Host-BFF an:
 
 | Benutzer | Passwort | Rollen |
 | --- | --- | --- |
 | `admin` | `Admin123!` | admin, user |
 | `user` | `User123!` | user |
 
-| Client | Secret | Redirect URI |
-| --- | --- | --- |
-| `mfe-bff` | `dev-secret-change-me` | `http://localhost:5000/signin-oidc` |
+| Client | Secret | Redirect URI | API-Scope |
+| --- | --- | --- | --- |
+| `mfe-vue-host` | `dev-secret-change-me` | `http://localhost:5010/signin-oidc` | `vue-demo-api` |
+| `mfe-react-host` | `dev-secret-change-me` | `http://localhost:5020/signin-oidc` | `react-demo-api` |
+
+Ein API-Scope landet als Audience (`aud`) im Access Token. Die Remote-BFFs der Plattform prüfen genau diese Audience.
 
 ## Konfiguration
 
@@ -39,11 +42,11 @@ In Development legt `appsettings.Development.json` zwei Testbenutzer und den Cli
     "Users": [ { "UserName": "…", "Email": "…", "Password": "…", "Roles": [ "user" ] } ],
     "Clients": [
       {
-        "ClientId": "mfe-bff",
+        "ClientId": "mfe-vue-host",
         "ClientSecret": "…",          // leer = Public Client
         "RedirectUris": [ "…/signin-oidc" ],
         "PostLogoutRedirectUris": [ "…/signout-callback-oidc" ],
-        "Scopes": [ "api" ]           // zusätzliche API-Scopes
+        "Scopes": [ "vue-demo-api" ]  // API-Scopes, werden zur Audience im Access Token
       }
     ]
   },
