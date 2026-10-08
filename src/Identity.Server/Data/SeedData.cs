@@ -90,10 +90,14 @@ public sealed class SeedData(IServiceProvider services, ILogger<SeedData> logger
                 ClientType = string.IsNullOrEmpty(client.ClientSecret) ? ClientTypes.Public : ClientTypes.Confidential,
                 ApplicationType = ApplicationTypes.Web,
                 ConsentType = ConsentTypes.Implicit,
-                Permissions =
-                {
+                Permissions = { Permissions.Endpoints.Token },
+            };
+
+            if (client.GrantTypes.Contains(SeedClient.AuthorizationCode, StringComparer.Ordinal))
+            {
+                descriptor.Permissions.UnionWith(
+                [
                     Permissions.Endpoints.Authorization,
-                    Permissions.Endpoints.Token,
                     Permissions.Endpoints.EndSession,
                     Permissions.GrantTypes.AuthorizationCode,
                     Permissions.GrantTypes.RefreshToken,
@@ -102,9 +106,15 @@ public sealed class SeedData(IServiceProvider services, ILogger<SeedData> logger
                     Permissions.Scopes.Profile,
                     Permissions.Scopes.Roles,
                     Permissions.Prefixes.Scope + Scopes.OfflineAccess,
-                },
-                Requirements = { Requirements.Features.ProofKeyForCodeExchange },
-            };
+                ]);
+                descriptor.Requirements.Add(Requirements.Features.ProofKeyForCodeExchange);
+            }
+
+            // Service clients get a token for themselves, never for a user: no login, no refresh token, no user scopes.
+            if (client.GrantTypes.Contains(SeedClient.ClientCredentials, StringComparer.Ordinal))
+            {
+                descriptor.Permissions.Add(Permissions.GrantTypes.ClientCredentials);
+            }
 
             foreach (var scope in client.Scopes)
             {
