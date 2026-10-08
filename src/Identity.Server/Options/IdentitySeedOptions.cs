@@ -40,14 +40,4 @@ public sealed class SeedClient
 
     /// <summary>Additional (API) scopes the client may request besides openid, profile, email, roles and offline_access.</summary>
     public List<string> Scopes { get; set; } = [];
-
-    /// <summary>
-    /// OAuth grant types: "authorization_code" (with refresh tokens) for BFFs that sign users in, "client_credentials"
-    /// for services that call APIs on their own behalf, e.g. a remote BFF registering itself at its host BFF.
-    /// </summary>
-    public List<string> GrantTypes { get; set; } = [AuthorizationCode];
-
-    public const string AuthorizationCode = "authorization_code";
-
-    public const string ClientCredentials = "client_credentials";
 }

@@ -42,7 +42,6 @@ builder.Services.AddOpenIddict()
 
         options.AllowAuthorizationCodeFlow()
             .AllowRefreshTokenFlow()
-            .AllowClientCredentialsFlow()
             .RequireProofKeyForCodeExchange();
 
         options.RegisterScopes(Scopes.OpenId, Scopes.Profile, Scopes.Email, Scopes.Roles, Scopes.OfflineAccess);
