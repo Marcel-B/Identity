@@ -1,0 +1,16 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Start";
+}
+
+@if (User.Identity?.IsAuthenticated == true)
+{
+    <p>Angemeldet als <strong>@User.Identity.Name</strong>.</p>
+    <form method="post"><button type="submit">Abmelden</button></form>
+}
+else
+{
+    <p>Nicht angemeldet.</p>
+    <a href="/Account/Login">Zur Anmeldung</a>
+}
