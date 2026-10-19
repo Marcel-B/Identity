@@ -20,6 +20,12 @@ public sealed class ServerOptions
     /// <summary>Whether OpenIddict rejects plain HTTP requests. Only switch off for local development.</summary>
     public bool RequireHttps { get; set; } = true;
 
+    /// <summary>
+    /// Origins of browser apps (SPAs) that call the token, userinfo and discovery endpoints directly,
+    /// e.g. <c>https://app.example</c>. Empty means no CORS headers at all.
+    /// </summary>
+    public List<string> CorsOrigins { get; set; } = [];
+
     /// <summary>Trust X-Forwarded-* headers, for running behind a reverse proxy.</summary>
     public bool UseForwardedHeaders { get; set; }
 

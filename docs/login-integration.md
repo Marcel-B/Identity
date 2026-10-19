@@ -139,7 +139,14 @@ export const userManager = new UserManager({
 // Abmelden:   await userManager.signoutRedirect();   // schickt id_token_hint mit, dann ohne Rückfrage
 ```
 
-Der Server sendet keine CORS-Header (Stand dieses Repos). Ruft eine SPA aus einer anderen Origin direkt `/connect/token` oder das Discovery-Dokument auf, blockiert der Browser. Dann entweder ein BFF verwenden (empfohlen, siehe ASP.NET Core oben bzw. Node unten) oder im Server CORS für die Origin der SPA ergänzen. Das ist eine Änderung an diesem Repo, nicht an der App.
+Die SPA ruft Discovery, `/connect/token` und `/connect/userinfo` direkt aus dem Browser auf. Dafür muss ihre Origin (Schema, Host, Port, ohne Pfad) in der Server-Konfiguration unter `Server:CorsOrigins` stehen, z.B. in `/etc/identity/identity.env` im LXC:
+
+```bash
+Server__CorsOrigins__0=https://rezepte.<tailnet>.ts.net
+Server__CorsOrigins__1=http://localhost:5173
+```
+
+Danach `systemctl restart identity`. Das kann nur der Benutzer bzw. Admin des Servers; nenne ihm die genauen Origins. CORS gilt nur für `/connect/*` und `/.well-known/*` und ohne Cookies.
 
 ### Node.js-Backend (Express, Fastify, Next.js-Server)
 
@@ -233,12 +240,12 @@ Eigene lokale Clients im Admin unter `http://localhost:5001/Admin/Clients` anleg
 | `consent_required` | Client steht auf `explicit` und es wurde `prompt=none` verwendet |
 | API antwortet 401, Token sieht gut aus | `aud` passt nicht (API-Scope nicht angefragt) oder `typ: at+jwt` wird abgelehnt |
 | Rollen fehlen in `User.IsInRole` | `MapInboundClaims` nicht ausgeschaltet oder `RoleClaimType` nicht auf `role` gesetzt |
-| Discovery/Token-Aufruf im Browser blockiert | CORS, siehe SPA-Abschnitt |
+| Discovery/Token-Aufruf im Browser blockiert (CORS) | Origin der SPA fehlt in `Server:CorsOrigins`, siehe SPA-Abschnitt |
 
 ## Checkliste für die Session im anderen Projekt
 
 1. Authority (Issuer-URL) vom Benutzer bestätigen lassen und als Konfiguration ablegen, nicht hart kodieren.
-2. Client-Art festlegen (Web-App/BFF, SPA, Dienst) und dem Benutzer die Werte aus Schritt 1 nennen, die er im Admin einträgt.
+2. Client-Art festlegen (Web-App/BFF, SPA, Dienst) und dem Benutzer die Werte aus Schritt 1 nennen, die er im Admin einträgt. Bei einer SPA zusätzlich die Origins für `Server:CorsOrigins`.
 3. Secret nur über Umgebungsvariable oder Secret-Store einlesen.
 4. Bibliothek aus Schritt 2 einbauen, Claims-Mapping (`name`, `role`) setzen.
 5. Lokal gegen `http://localhost:5001` oder direkt gegen den Server im Tailnet testen: Anmelden, Claims prüfen, Abmelden.

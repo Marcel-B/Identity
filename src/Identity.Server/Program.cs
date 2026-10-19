@@ -239,6 +239,16 @@ builder.Services.AddRazorPages(options =>
     options.Conventions.AuthorizeFolder("/Admin", Policies.Admin);
 });
 
+// Without cookies: SPAs send tokens themselves, so no credentials are needed across origins.
+var corsOrigins = serverOptions.CorsOrigins
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Where(origin => origin.Length > 0)
+    .ToArray();
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
+    .WithOrigins(corsOrigins)
+    .WithMethods(HttpMethods.Get, HttpMethods.Post)
+    .AllowAnyHeader()));
+
 builder.Services.AddHealthChecks().AddDbContextCheck<ApplicationDbContext>();
 
 if (serverOptions.UseForwardedHeaders)
@@ -270,6 +280,15 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/Error", "?code={0}");
 app.UseStaticFiles();
 app.UseRouting();
+
+// Before authentication: OpenIddict answers discovery, token and userinfo requests in the authentication middleware.
+if (corsOrigins.Length > 0)
+{
+    app.UseWhen(
+        context => context.Request.Path.StartsWithSegments("/connect") || context.Request.Path.StartsWithSegments("/.well-known"),
+        branch => branch.UseCors());
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 

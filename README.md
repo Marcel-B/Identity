@@ -9,6 +9,7 @@ OpenID-Connect- und OAuth-2.0-Server auf Basis von ASP.NET Core (.NET 10), [ASP.
 - UserInfo, Logout (End Session), Introspection, Revocation, Discovery und JWKS
 - Access Tokens als signierte JWTs; API-Scopes werden zur Audience (`aud`)
 - Rollen als `role`-Claim im Access Token und mit Scope `roles` auch im ID Token
+- CORS für SPAs auf den OIDC-Endpunkten, nur für konfigurierte Origins
 - Zustimmungsseite für fremde Clients (`explicit`), eigene Clients ohne Nachfrage (`implicit`)
 - Refresh Tokens werden ungültig, sobald sich Passwort oder Sicherheitsstempel des Benutzers ändern
 - Abgelaufene Tokens und Autorisierungen räumt ein Hintergrundjob auf
@@ -53,7 +54,7 @@ Alle Einstellungen gehen auch als Umgebungsvariablen, z.B. `Server__Issuer` oder
 | --- | --- |
 | `Database:Provider` | `Sqlite` (Standard) oder `Postgres` |
 | `ConnectionStrings:Identity` | z.B. `Data Source=/var/lib/identity/identity.db` oder `Host=…;Database=identity;Username=…;Password=…` |
-| `Server` | `Issuer` (öffentliche URL), `DisplayName`, `AllowRegistration`, `RequireConfirmedEmail`, `RequireHttps`, `UseForwardedHeaders` (hinter Reverse Proxy), `MigrateDatabaseOnStartup` |
+| `Server` | `Issuer` (öffentliche URL), `DisplayName`, `AllowRegistration`, `RequireConfirmedEmail`, `RequireHttps`, `UseForwardedHeaders` (hinter Reverse Proxy), `MigrateDatabaseOnStartup`, `CorsOrigins` (Origins von SPAs, die Token- und Discovery-Endpunkte direkt aufrufen, z.B. `Server__CorsOrigins__0=https://app.example`) |
 | `Keys` | Zertifikate für Signatur und Verschlüsselung (siehe unten) |
 | `Seed` | Erster Admin, Rollen, Scopes und Clients. Wird nur angelegt, wenn es fehlt; Änderungen aus der Verwaltung bleiben erhalten |
 | `ExternalProviders` | `GitHub`, `Google`, `Microsoft` mit `ClientId`/`ClientSecret` (Microsoft zusätzlich `Tenant`). Ein Anbieter ist aktiv, sobald er eine Client-ID hat |

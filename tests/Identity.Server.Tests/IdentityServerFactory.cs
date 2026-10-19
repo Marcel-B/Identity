@@ -19,6 +19,7 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     public const string AdminEmail = "admin@example.com";
     public const string AdminPassword = "Admin12345!";
     public const string ClientSecret = "test-secret";
+    public const string SpaOrigin = "https://spa.example";
 
     private static readonly bool UsePostgres =
         string.Equals(Environment.GetEnvironmentVariable("IDENTITY_TEST_DATABASE"), "Postgres", StringComparison.OrdinalIgnoreCase);
@@ -57,6 +58,7 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
             ["Keys:UseEphemeralKeys"] = "true",
             ["Server:RequireHttps"] = "false",
             ["Server:RequireConfirmedEmail"] = "true",
+            ["Server:CorsOrigins:0"] = SpaOrigin,
             ["Seed:Admin:Email"] = AdminEmail,
             ["Seed:Admin:Password"] = AdminPassword,
             ["Seed:Roles:0"] = "user",
