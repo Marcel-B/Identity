@@ -119,12 +119,14 @@ TS_AUTHKEY=tskey-auth-… ADMIN_EMAIL=du@example.com bash create-lxc.sh
 | `TS_FUNNEL` | `0` | `1` macht den Server per Tailscale Funnel auch aus dem Internet erreichbar |
 | `ADMIN_EMAIL` | `admin@example.com` | Erster Admin; das Passwort wird erzeugt und am Ende einmal angezeigt |
 | `REPO_URL`, `REPO_BRANCH`, `GIT_TOKEN` | dieses Repo, `main`, – | Quelle; Token nur für private Repos |
+| `AUTO_UPDATE`, `UPDATE_INTERVAL` | `1`, `15min` | Neue Commits auf `REPO_BRANCH` automatisch bereitstellen, und wie oft geprüft wird |
 
-Bricht die Einrichtung ab, das Skript mit derselben `CTID` erneut starten: Der vorhandene Container wird weiter eingerichtet, Schlüssel, Einstellungen und Datenbank bleiben erhalten.
+Bricht die Einrichtung ab, das Skript mit derselben `CTID` erneut starten: Der vorhandene Container wird weiter eingerichtet, Schlüssel, Einstellungen und Datenbank bleiben erhalten. Genauso bekommt ein bestehender Container neue Funktionen des Skripts, etwa die automatischen Updates.
 
 Im Container:
 - Einstellungen in `/etc/identity/identity.env` (z.B. SMTP, externe Logins), danach `systemctl restart identity`
-- Neuen Stand bauen und starten: `identity-update`
+- Automatische Updates: Ein systemd-Timer prüft alle `UPDATE_INTERVAL`, ob es auf `REPO_BRANCH` einen neuen Commit gibt, baut ihn und startet den Server neu. Schlägt der Build fehl, läuft die alte Version weiter; wird die neue nach dem Neustart nicht gesund (`/health`), stellt das Skript die vorherige wieder her. Ein fehlgeschlagener Commit wird erst mit dem nächsten Commit erneut versucht. Logs: `journalctl -u identity-update`, abschalten: `systemctl disable --now identity-update.timer`
+- Sofort aktualisieren: `identity-update`
 - Logs: `journalctl -u identity -f`
 - Backup: `sqlite3 /var/lib/identity/identity.db ".backup /root/identity-backup.db"`, dazu `/etc/identity` sichern (Zertifikate)
 

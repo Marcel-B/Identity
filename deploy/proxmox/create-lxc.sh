@@ -29,6 +29,8 @@ ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
 REPO_URL="${REPO_URL:-https://github.com/Marcel-B/Identity.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 GIT_TOKEN="${GIT_TOKEN:-}"                    # only for a private repository
+AUTO_UPDATE="${AUTO_UPDATE:-1}"               # 1: deploy new commits on REPO_BRANCH automatically
+UPDATE_INTERVAL="${UPDATE_INTERVAL:-15min}"   # how often to check (systemd time span)
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -194,15 +196,32 @@ fi
 log "Installing the update command"
 cat >/usr/local/bin/identity-update <<'EOF'
 #!/usr/bin/env bash
-# Pulls the latest code, builds it and restarts the server. For a private repository: GIT_TOKEN=... identity-update
+# Pulls the latest code, builds it and restarts the server. If the new version does not come up
+# healthy, the previous one is restored.
+#   identity-update               deploy the current state of the branch
+#   identity-update --if-changed  only when the branch has a commit that is not deployed yet (used by the timer)
 set -euo pipefail
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+token="${GIT_TOKEN:-}"
 source /etc/identity/source.env
+GIT_TOKEN="${token:-${GIT_TOKEN:-}}"
 SRC_DIR=/opt/identity/src APP_DIR=/opt/identity/app
+DEPLOYED=/opt/identity/deployed-commit FAILED=/opt/identity/failed-commit
+
+exec 9>/run/identity-update.lock
+flock -n 9 || { echo "Another update is running."; exit 0; }
 
 url="$REPO_URL"
 if [[ -n ${GIT_TOKEN:-} ]]; then
     url="${REPO_URL/https:\/\//https://x-access-token:$GIT_TOKEN@}"
+fi
+
+if [[ ${1:-} == --if-changed ]]; then
+    latest="$(git ls-remote "$url" "refs/heads/$REPO_BRANCH" | cut -f1)"
+    [[ -n $latest ]] || { echo "Branch $REPO_BRANCH not found." >&2; exit 1; }
+    [[ $latest == "$(cat "$DEPLOYED" 2>/dev/null)" ]] && exit 0
+    # A commit that failed once is not built again on every run; a newer commit or a manual run retries.
+    [[ $latest == "$(cat "$FAILED" 2>/dev/null)" ]] && exit 0
 fi
 
 if [[ -d $SRC_DIR/.git ]]; then
@@ -212,25 +231,58 @@ else
     git clone --depth 1 --branch "$REPO_BRANCH" "$url" "$SRC_DIR"
     git -C "$SRC_DIR" remote set-url origin "$REPO_URL"
 fi
+commit="$(git -C "$SRC_DIR" rev-parse HEAD)"
+echo "Building ${commit:0:7}"
 
-dotnet publish "$SRC_DIR/src/Identity.Server/Identity.Server.csproj" -c Release -o "$APP_DIR.new"
+rm -rf "$APP_DIR.new"
+if ! dotnet publish "$SRC_DIR/src/Identity.Server/Identity.Server.csproj" -c Release -o "$APP_DIR.new"; then
+    echo "$commit" >"$FAILED"
+    echo "Build of ${commit:0:7} failed, the running version stays." >&2
+    exit 1
+fi
 rm -rf "$APP_DIR.old"
-[[ -d $APP_DIR ]] && mv "$APP_DIR" "$APP_DIR.old"
+if [[ -d $APP_DIR ]]; then mv "$APP_DIR" "$APP_DIR.old"; fi
 mv "$APP_DIR.new" "$APP_DIR"
+
+healthy() {
+    for _ in $(seq 1 30); do
+        curl -fsS -o /dev/null http://127.0.0.1:8080/health && return 0
+        sleep 2
+    done
+    return 1
+}
 
 if systemctl is-enabled identity &>/dev/null; then
     systemctl restart identity
+    if ! healthy; then
+        echo "${commit:0:7} did not become healthy, restoring the previous version." >&2
+        echo "$commit" >"$FAILED"
+        if [[ -d $APP_DIR.old ]]; then
+            mv "$APP_DIR" "$APP_DIR.new"
+            mv "$APP_DIR.old" "$APP_DIR"
+            systemctl restart identity
+        fi
+        exit 1
+    fi
 fi
-echo "Deployed $(git -C "$SRC_DIR" rev-parse --short HEAD)"
+echo "$commit" >"$DEPLOYED"
+rm -f "$FAILED"
+echo "Deployed ${commit:0:7}"
 EOF
 chmod 755 /usr/local/bin/identity-update
+# Root only: also holds the token of a private repository, so the timer can fetch.
+if [[ -z $GIT_TOKEN && -f $CONF_DIR/source.env ]]; then
+    GIT_TOKEN="$(sed -n 's/^GIT_TOKEN=//p' "$CONF_DIR/source.env")"
+fi
+install -m 600 /dev/null "$CONF_DIR/source.env"
 cat >"$CONF_DIR/source.env" <<EOF
 REPO_URL=$REPO_URL
 REPO_BRANCH=$REPO_BRANCH
+GIT_TOKEN=$GIT_TOKEN
 EOF
 
 log "Building the server"
-GIT_TOKEN="$GIT_TOKEN" /usr/local/bin/identity-update
+/usr/local/bin/identity-update
 
 log "Creating the systemd service"
 cat >/etc/systemd/system/identity.service <<EOF
@@ -268,6 +320,36 @@ for _ in $(seq 1 60); do
 done
 curl -fs http://127.0.0.1:8080/health >/dev/null || { journalctl -u identity -n 50 --no-pager; exit 1; }
 
+log "Setting up automatic updates"
+if [[ $AUTO_UPDATE == 1 ]]; then
+    cat >/etc/systemd/system/identity-update.service <<'EOF'
+[Unit]
+Description=Deploy a new version of the identity server from git
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/identity-update --if-changed
+EOF
+    cat >/etc/systemd/system/identity-update.timer <<EOF
+[Unit]
+Description=Check for a new version of the identity server
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=$UPDATE_INTERVAL
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now identity-update.timer
+else
+    systemctl disable --now identity-update.timer 2>/dev/null || true
+fi
+
 log "Publishing over Tailscale"
 if [[ $TS_FUNNEL == 1 ]]; then
     tailscale funnel --bg http://127.0.0.1:8080
@@ -283,7 +365,10 @@ if [[ -n $ADMIN_PASSWORD ]]; then
     echo "Password:  $ADMIN_PASSWORD   (shown only now, please change it after the first sign-in)"
 fi
 echo "Settings:  $CONF_DIR/identity.env, then: systemctl restart identity"
-echo "Update:    identity-update"
+if [[ $AUTO_UPDATE == 1 ]]; then
+    echo "Updates:   new commits on $REPO_BRANCH are deployed every $UPDATE_INTERVAL (journalctl -u identity-update)"
+fi
+echo "Update now: identity-update"
 echo "Backup:    sqlite3 /var/lib/identity/identity.db \".backup /root/identity-backup.db\""
 PROVISION_EOF
 
@@ -293,6 +378,7 @@ log "Provisioning the container"
 pct exec "$CTID" -- env \
     CT_HOSTNAME="$CT_HOSTNAME" TS_AUTHKEY="$TS_AUTHKEY" TS_FUNNEL="$TS_FUNNEL" \
     ADMIN_EMAIL="$ADMIN_EMAIL" REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" GIT_TOKEN="$GIT_TOKEN" \
+    AUTO_UPDATE="$AUTO_UPDATE" UPDATE_INTERVAL="$UPDATE_INTERVAL" \
     bash /root/provision-identity.sh ||
     die "Setup of container $CTID stopped. Fix the cause and run the script again with CTID=$CTID to continue."
 
