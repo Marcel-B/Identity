@@ -1,0 +1,19 @@
+@page
+@model LoginWith2faModel
+@{
+    ViewData["Title"] = "Zwei-Faktor-Anmeldung";
+}
+<div class="card">
+    <h1>Zwei-Faktor-Anmeldung</h1>
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <input type="hidden" asp-for="ReturnUrl" />
+        <input type="hidden" asp-for="RememberMe" />
+        <label asp-for="Code"></label>
+        <input asp-for="Code" autocomplete="one-time-code" inputmode="numeric" autofocus />
+        <span asp-validation-for="Code" class="field-error"></span>
+        <label class="check"><input asp-for="RememberMachine" /> @Html.DisplayNameFor(m => m.RememberMachine)</label>
+        <button type="submit" class="block">Bestätigen</button>
+    </form>
+    <p class="muted">Kein Zugriff auf die App? <a asp-page="./LoginWithRecoveryCode" asp-route-returnUrl="@Model.ReturnUrl">Mit Wiederherstellungscode anmelden</a></p>
+</div>

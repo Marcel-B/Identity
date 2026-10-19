@@ -1,0 +1,46 @@
+@page
+@model Identity.Server.Pages.Admin.Users.IndexModel
+@{
+    ViewData["Title"] = "Benutzer";
+    ViewData["AdminPage"] = "users";
+}
+<h1>Benutzer</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <form method="get" class="actions search">
+        <input type="search" name="q" value="@Model.Query" placeholder="E-Mail, Benutzername oder Name" />
+        <button type="submit" class="secondary">Suchen</button>
+        <a class="button" asp-page="./Create">Neuer Benutzer</a>
+    </form>
+    <p class="muted">@Model.Total Benutzer</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>E-Mail</th><th>Name</th><th>Status</th><th>Angelegt</th></tr></thead>
+            <tbody>
+                @foreach (var user in Model.Users)
+                {
+                    <tr>
+                        <td><a asp-page="./Edit" asp-route-id="@user.Id">@user.Email</a></td>
+                        <td>@user.DisplayName</td>
+                        <td>
+                            @if (!user.EmailConfirmed) { <span class="badge">unbestätigt</span> }
+                            @if (user.LockoutEnd > DateTimeOffset.UtcNow) { <span class="badge">gesperrt</span> }
+                            @if (user.TwoFactorEnabled) { <span class="badge">2FA</span> }
+                        </td>
+                        <td>@user.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions">
+        @if (Model.PageNumber > 1)
+        {
+            <a asp-route-q="@Model.Query" asp-route-page="@(Model.PageNumber - 1)">« Zurück</a>
+        }
+        @if (Model.HasNext)
+        {
+            <a asp-route-q="@Model.Query" asp-route-page="@(Model.PageNumber + 1)">Weiter »</a>
+        }
+    </div>
+</div>

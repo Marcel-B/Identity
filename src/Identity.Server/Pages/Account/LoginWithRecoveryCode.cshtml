@@ -1,0 +1,17 @@
+@page
+@model LoginWithRecoveryCodeModel
+@{
+    ViewData["Title"] = "Wiederherstellungscode";
+}
+<div class="card">
+    <h1>Mit Wiederherstellungscode anmelden</h1>
+    <p class="muted">Jeder Code funktioniert nur einmal.</p>
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <input type="hidden" asp-for="ReturnUrl" />
+        <label asp-for="RecoveryCode"></label>
+        <input asp-for="RecoveryCode" autocomplete="off" autofocus />
+        <span asp-validation-for="RecoveryCode" class="field-error"></span>
+        <button type="submit" class="block">Anmelden</button>
+    </form>
+</div>

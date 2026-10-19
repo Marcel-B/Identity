@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Identity.Server.Data;
 using Identity.Server.Options;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -8,48 +9,119 @@ using Microsoft.Extensions.Options;
 namespace Identity.Server.Pages.Account;
 
 public sealed class LoginModel(
-    SignInManager<IdentityUser> signInManager,
-    IOptions<IdentitySeedOptions> seedOptions,
-    IWebHostEnvironment environment) : PageModel
+    SignInManager<ApplicationUser> signInManager,
+    UserManager<ApplicationUser> userManager,
+    IOptions<ServerOptions> serverOptions,
+    IOptions<ExternalProviderOptions> providerOptions,
+    ILogger<LoginModel> logger) : PageModel
 {
+    [BindProperty]
+    public InputModel Input { get; set; } = new();
+
+    [BindProperty]
+    public string? PasskeyCredential { get; set; }
+
     [BindProperty(SupportsGet = true)]
     public string? ReturnUrl { get; set; }
 
-    [BindProperty, Required]
-    public string UserName { get; set; } = string.Empty;
+    public IReadOnlyList<string> ExternalProviders { get; private set; } = [];
 
-    [BindProperty, Required]
-    public string Password { get; set; } = string.Empty;
+    public bool AllowRegistration => serverOptions.Value.AllowRegistration;
 
-    [BindProperty]
-    public bool RememberMe { get; set; }
-
-    public string? ErrorMessage { get; private set; }
-
-    public IReadOnlyList<SeedUser> DemoUsers =>
-        environment.IsDevelopment() ? seedOptions.Value.Users : [];
-
-    public void OnGet()
+    public sealed class InputModel
     {
+        [Required(ErrorMessage = "Bitte gib deinen Benutzernamen oder deine E-Mail-Adresse ein.")]
+        [Display(Name = "E-Mail oder Benutzername")]
+        public string Login { get; set; } = "";
+
+        [Required(ErrorMessage = "Bitte gib dein Passwort ein.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Passwort")]
+        public string Password { get; set; } = "";
+
+        [Display(Name = "Angemeldet bleiben")]
+        public bool RememberMe { get; set; }
     }
+
+    public void OnGet() => Load();
 
     public async Task<IActionResult> OnPostAsync()
     {
+        Load();
+        ModelState.Remove(nameof(PasskeyCredential));
         if (!ModelState.IsValid)
         {
-            ErrorMessage = "Bitte Benutzername und Passwort eingeben.";
             return Page();
         }
 
-        var result = await signInManager.PasswordSignInAsync(UserName, Password, RememberMe, lockoutOnFailure: true);
-        if (result.Succeeded)
+        var user = await userManager.FindByNameAsync(Input.Login) ?? await userManager.FindByEmailAsync(Input.Login);
+        if (user is null)
         {
-            return LocalRedirect(Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/");
+            ModelState.AddModelError(string.Empty, "Benutzername oder Passwort ist falsch.");
+            return Page();
         }
 
-        ErrorMessage = result.IsLockedOut
-            ? "Das Konto ist vorübergehend gesperrt."
-            : "Benutzername oder Passwort ist falsch.";
+        var result = await signInManager.PasswordSignInAsync(user, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+
+        // Identity refuses unconfirmed accounts before it checks the password. Only tell people with the
+        // right password why, so the hint does not reveal which addresses have an account.
+        if (result.IsNotAllowed && !await userManager.CheckPasswordAsync(user, Input.Password))
+        {
+            result = Microsoft.AspNetCore.Identity.SignInResult.Failed;
+        }
+
+        return await HandleResultAsync(result, user);
+    }
+
+    public async Task<IActionResult> OnPostPasskeyAsync()
+    {
+        Load();
+        if (string.IsNullOrEmpty(PasskeyCredential))
+        {
+            ModelState.AddModelError(string.Empty, "Die Anmeldung mit Passkey wurde abgebrochen.");
+            return Page();
+        }
+
+        var result = await signInManager.PasskeySignInAsync(PasskeyCredential);
+        return await HandleResultAsync(result, user: null);
+    }
+
+    private async Task<IActionResult> HandleResultAsync(Microsoft.AspNetCore.Identity.SignInResult result, ApplicationUser? user)
+    {
+        var returnUrl = SafeReturnUrl();
+
+        if (result.Succeeded)
+        {
+            return LocalRedirect(returnUrl);
+        }
+
+        if (result.RequiresTwoFactor)
+        {
+            return RedirectToPage("./LoginWith2fa", new { returnUrl, rememberMe = Input.RememberMe });
+        }
+
+        if (result.IsLockedOut)
+        {
+            logger.LogWarning("Account {UserId} locked out.", user?.Id);
+            return RedirectToPage("./Lockout");
+        }
+
+        if (result.IsNotAllowed && user is not null && !await userManager.IsEmailConfirmedAsync(user))
+        {
+            ModelState.AddModelError(string.Empty, "Bitte bestätige zuerst deine E-Mail-Adresse.");
+            return Page();
+        }
+
+        ModelState.AddModelError(string.Empty, user is null
+            ? "Die Anmeldung mit Passkey ist fehlgeschlagen."
+            : "Benutzername oder Passwort ist falsch.");
         return Page();
     }
+
+    private void Load()
+    {
+        ExternalProviders = [.. providerOptions.Value.EnabledProviders];
+    }
+
+    private string SafeReturnUrl() => ReturnUrl is not null && Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/";
 }

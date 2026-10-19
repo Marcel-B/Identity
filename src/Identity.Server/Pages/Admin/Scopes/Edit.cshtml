@@ -1,0 +1,30 @@
+@page "{id?}"
+@model Identity.Server.Pages.Admin.Scopes.EditModel
+@{
+    ViewData["Title"] = Model.IsNew ? "Neuer Scope" : Model.Input.Name;
+    ViewData["AdminPage"] = "scopes";
+}
+<h1>@ViewData["Title"]</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label asp-for="Input.Name"></label>
+        <input asp-for="Input.Name" />
+        <span asp-validation-for="Input.Name" class="field-error"></span>
+
+        <label asp-for="Input.DisplayName"></label>
+        <input asp-for="Input.DisplayName" />
+
+        <label asp-for="Input.Resources"></label>
+        <textarea asp-for="Input.Resources"></textarea>
+
+        <div class="actions"><button type="submit">Speichern</button></div>
+    </form>
+    @if (!Model.IsNew)
+    {
+        <form method="post" asp-page-handler="Delete" onsubmit="return confirm('Scope löschen?');">
+            <div class="actions"><button type="submit" class="danger">Löschen</button></div>
+        </form>
+    }
+</div>

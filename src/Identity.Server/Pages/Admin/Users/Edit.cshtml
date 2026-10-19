@@ -1,0 +1,72 @@
+@page "{id}"
+@model Identity.Server.Pages.Admin.Users.EditModel
+@{
+    var user = Model.Account!;
+    ViewData["Title"] = user.Email;
+    ViewData["AdminPage"] = "users";
+    var locked = user.LockoutEnd > DateTimeOffset.UtcNow;
+}
+<h1>@user.Email</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <h2>Stammdaten</h2>
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label asp-for="Input.Email"></label>
+        <input asp-for="Input.Email" />
+        <span asp-validation-for="Input.Email" class="field-error"></span>
+
+        <label asp-for="Input.DisplayName"></label>
+        <input asp-for="Input.DisplayName" />
+
+        <label class="check"><input asp-for="Input.EmailConfirmed" /> @Html.DisplayNameFor(m => m.Input.EmailConfirmed)</label>
+
+        <label>Rollen</label>
+        @foreach (var role in Model.AllRoles)
+        {
+            var self = Model.IsSelf && role == DatabaseInitializer.AdminRole;
+            <label class="check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" disabled="@self" /> @role</label>
+            @if (self)
+            {
+                <input type="hidden" name="Input.Roles" value="@role" />
+            }
+        }
+        <div class="actions"><button type="submit">Speichern</button></div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Anmeldung</h2>
+    <ul>
+        <li>Passwort: @(Model.HasPassword ? "gesetzt" : "keins")</li>
+        <li>Zwei-Faktor: @(user.TwoFactorEnabled ? "an" : "aus")</li>
+        <li>Passkeys: @Model.PasskeyCount</li>
+        <li>Externe Konten: @(Model.Logins.Count > 0 ? string.Join(", ", Model.Logins.Select(login => login.ProviderDisplayName)) : "keine")</li>
+        <li>Status: @(locked ? "gesperrt" : "aktiv")@(user.AccessFailedCount > 0 ? $", {user.AccessFailedCount} Fehlversuche" : "")</li>
+    </ul>
+    <div class="actions">
+        <form method="post" asp-page-handler="SendPasswordReset" asp-route-id="@user.Id" class="inline">
+            <button type="submit" class="secondary">Passwort-Reset senden</button>
+        </form>
+        @if (user.TwoFactorEnabled)
+        {
+            <form method="post" asp-page-handler="ResetTwoFactor" asp-route-id="@user.Id" class="inline">
+                <button type="submit" class="secondary">2FA zurücksetzen</button>
+            </form>
+        }
+        <form method="post" asp-page-handler="SignOutEverywhere" asp-route-id="@user.Id" class="inline">
+            <button type="submit" class="secondary">Überall abmelden</button>
+        </form>
+        @if (!Model.IsSelf)
+        {
+            <form method="post" asp-page-handler="Lock" asp-route-id="@user.Id" class="inline">
+                <input type="hidden" name="locked" value="@(locked ? "false" : "true")" />
+                <button type="submit" class="secondary">@(locked ? "Entsperren" : "Sperren")</button>
+            </form>
+            <form method="post" asp-page-handler="Delete" asp-route-id="@user.Id" class="inline"
+                  onsubmit="return confirm('Benutzer endgültig löschen?');">
+                <button type="submit" class="danger">Löschen</button>
+            </form>
+        }
+    </div>
+</div>

@@ -1,0 +1,18 @@
+@model List<KeyValuePair<string, Microsoft.Extensions.Primitives.StringValues>>
+@{
+    ViewData["Title"] = "Abmelden";
+}
+<div class="card">
+    <h1>Abmelden?</h1>
+    <p>Möchtest du dich abmelden?</p>
+    <form method="post" asp-controller="Authorization" asp-action="LogoutPost">
+        @foreach (var parameter in Model)
+        {
+            foreach (var value in parameter.Value)
+            {
+                <input type="hidden" name="@parameter.Key" value="@value" />
+            }
+        }
+        <button type="submit">Abmelden</button>
+    </form>
+</div>

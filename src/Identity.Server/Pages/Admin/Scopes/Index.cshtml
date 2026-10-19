@@ -1,0 +1,27 @@
+@page
+@model Identity.Server.Pages.Admin.Scopes.IndexModel
+@{
+    ViewData["Title"] = "Scopes";
+    ViewData["AdminPage"] = "scopes";
+}
+<h1>Scopes</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <p class="muted">API-Scopes, die Clients anfragen dürfen. Die Ressourcen eines Scopes werden zur Audience (<code>aud</code>) im Access Token. Die OpenID-Connect-Scopes <code>openid</code>, <code>profile</code>, <code>email</code>, <code>roles</code> und <code>offline_access</code> sind fest eingebaut.</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Name</th><th>Anzeigename</th><th>Ressourcen</th></tr></thead>
+            <tbody>
+                @foreach (var scope in Model.Scopes)
+                {
+                    <tr>
+                        <td><a asp-page="./Edit" asp-route-id="@scope.Id">@scope.Name</a></td>
+                        <td>@scope.DisplayName</td>
+                        <td>@string.Join(", ", scope.Resources)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions"><a class="button" asp-page="./Edit">Neuer Scope</a></div>
+</div>

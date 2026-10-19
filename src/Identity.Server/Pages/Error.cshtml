@@ -1,0 +1,14 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "Fehler";
+}
+<div class="card">
+    <h1>@Model.Title</h1>
+    <p>@Model.Description</p>
+    @if (Model.RequestId is not null)
+    {
+        <p class="muted">Anfrage-ID: <code>@Model.RequestId</code></p>
+    }
+    <a href="~/">Zur Startseite</a>
+</div>

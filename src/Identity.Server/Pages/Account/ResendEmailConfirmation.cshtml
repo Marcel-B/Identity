@@ -1,0 +1,21 @@
+@page
+@model ResendEmailConfirmationModel
+@{
+    ViewData["Title"] = "Bestätigungsmail";
+}
+<div class="card">
+    <h1>Bestätigungsmail erneut senden</h1>
+    @if (Model.Sent)
+    {
+        <p>Wenn es ein unbestätigtes Konto mit dieser Adresse gibt, ist eine neue Mail unterwegs.</p>
+    }
+    else
+    {
+        <form method="post">
+            <label asp-for="Email"></label>
+            <input asp-for="Email" autocomplete="email" autofocus />
+            <span asp-validation-for="Email" class="field-error"></span>
+            <button type="submit" class="block">Senden</button>
+        </form>
+    }
+</div>

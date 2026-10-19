@@ -1,0 +1,18 @@
+@page
+@model ConfirmEmailModel
+@{
+    ViewData["Title"] = "E-Mail bestätigen";
+}
+<div class="card">
+    @if (Model.Succeeded)
+    {
+        <h1>Danke!</h1>
+        <p>Deine E-Mail-Adresse ist bestätigt.</p>
+        <a class="button" asp-page="./Login" asp-route-returnUrl="@Model.ReturnUrl">Jetzt anmelden</a>
+    }
+    else
+    {
+        <h1>Das hat nicht geklappt</h1>
+        <p>Der Link ist ungültig oder abgelaufen. <a asp-page="./ResendEmailConfirmation">Neuen Link anfordern</a></p>
+    }
+</div>

@@ -1,0 +1,20 @@
+@page
+@model Identity.Server.Pages.Admin.IndexModel
+@{
+    ViewData["Title"] = "Verwaltung";
+    ViewData["AdminPage"] = "overview";
+}
+<h1>Verwaltung</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <tbody>
+                <tr><td><a asp-page="./Users/Index">Benutzer</a></td><td>@Model.Users</td></tr>
+                <tr><td><a asp-page="./Roles/Index">Rollen</a></td><td>@Model.Roles</td></tr>
+                <tr><td><a asp-page="./Clients/Index">Clients</a></td><td>@Model.Clients</td></tr>
+                <tr><td><a asp-page="./Scopes/Index">Scopes</a></td><td>@Model.Scopes</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>

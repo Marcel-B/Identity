@@ -1,15 +1,44 @@
+@using Identity.Server.Options
+@using Microsoft.Extensions.Options
+@inject IOptions<ServerOptions> ServerOptions
+@inject SignInManager<ApplicationUser> SignInManager
+@{
+    var appName = ServerOptions.Value.DisplayName;
+    var signedIn = SignInManager.IsSignedIn(User);
+}
 <!DOCTYPE html>
 <html lang="de">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>@ViewData["Title"] · Identity</title>
-    <link rel="stylesheet" href="~/site.css" asp-append-version="true" />
+    <title>@(ViewData["Title"] is string title ? $"{title} · {appName}" : appName)</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
 <body>
-    <main class="card">
-        <h1 class="brand">Identity</h1>
+    <header class="topbar">
+        <a class="brand" href="~/">@appName</a>
+        <nav>
+            @if (signedIn)
+            {
+                <a asp-page="/Account/Manage/Index">Mein Konto</a>
+                @if (User.IsInRole(DatabaseInitializer.AdminRole))
+                {
+                    <a asp-page="/Admin/Index">Verwaltung</a>
+                }
+                <form method="post" asp-page="/Account/Logout" class="inline">
+                    <button type="submit" class="link">Abmelden</button>
+                </form>
+            }
+            else
+            {
+                <a asp-page="/Account/Login">Anmelden</a>
+            }
+        </nav>
+    </header>
+    <main class="@(ViewData["Wide"] is true ? "wide" : "narrow")">
+        <partial name="_Messages" />
         @RenderBody()
     </main>
+    @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

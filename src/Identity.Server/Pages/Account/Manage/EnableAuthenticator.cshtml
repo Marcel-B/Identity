@@ -1,0 +1,40 @@
+@page
+@model EnableAuthenticatorModel
+@{
+    ViewData["Title"] = "Authenticator-App einrichten";
+    ViewData["ManagePage"] = "2fa";
+}
+<h1>Mein Konto</h1>
+<partial name="_ManageNav" />
+
+@if (Model.RecoveryCodes is not null)
+{
+    <div class="card">
+        <h2>Fertig! Hier sind deine Wiederherstellungscodes</h2>
+        <p>Bewahre sie sicher auf. Jeder Code funktioniert einmal, falls du keinen Zugriff auf die App hast. Sie werden nicht noch einmal angezeigt.</p>
+        <div class="codes">
+            @foreach (var code in Model.RecoveryCodes)
+            {
+                <code>@code</code>
+            }
+        </div>
+        <div class="actions"><a class="button" asp-page="./TwoFactor">Weiter</a></div>
+    </div>
+}
+else
+{
+    <div class="card">
+        <h2>Authenticator-App einrichten</h2>
+        <ol>
+            <li>Scanne den QR-Code mit deiner Authenticator-App oder gib den Schlüssel <code>@Model.SharedKey</code> von Hand ein.</li>
+            <li>Gib den sechsstelligen Code ein, den die App anzeigt.</li>
+        </ol>
+        <div class="qr">@Html.Raw(Model.QrCodeSvg)</div>
+        <form method="post">
+            <label asp-for="Code"></label>
+            <input asp-for="Code" autocomplete="one-time-code" inputmode="numeric" />
+            <span asp-validation-for="Code" class="field-error"></span>
+            <div class="actions"><button type="submit">Bestätigen</button></div>
+        </form>
+    </div>
+}
