@@ -152,6 +152,8 @@ builder.Services.AddAuthentication(options =>
 
 Eine API prüft das Access Token mit `AddJwtBearer` (`Authority` = Issuer, `Audience` = Name der Ressource, z.B. `demo-api`).
 
+Ausführlich, auch für SPAs, Node.js und Dienste: [docs/login-integration.md](docs/login-integration.md).
+
 ## Entwicklung
 
 ```bash
