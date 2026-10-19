@@ -1,31 +1,17 @@
 # Local try-out: docker compose up --build, then open http://localhost:5001
 # Uses development certificates inside the container; see README for production keys.
 services:
-  postgres:
-    image: postgres:17
-    environment:
-      POSTGRES_DB: identity
-      POSTGRES_USER: identity
-      POSTGRES_PASSWORD: identity
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U identity"]
-      interval: 5s
-      retries: 10
-
   identity:
     build:
       context: .
       dockerfile: src/Identity.Server/Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "5001:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__Identity: Host=postgres;Database=identity;Username=identity;Password=identity
+      ConnectionStrings__Identity: Data Source=/data/identity.db
+    volumes:
+      - identity-data:/data
 
 volumes:
-  postgres-data:
+  identity-data:

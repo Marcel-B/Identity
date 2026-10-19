@@ -1,6 +1,6 @@
 # Identity
 
-OpenID-Connect- und OAuth-2.0-Server auf Basis von ASP.NET Core (.NET 10), [ASP.NET Core Identity](https://learn.microsoft.com/aspnet/core/security/authentication/identity) und [OpenIddict](https://documentation.openiddict.com/). Daten liegen in PostgreSQL.
+OpenID-Connect- und OAuth-2.0-Server auf Basis von ASP.NET Core (.NET 10), [ASP.NET Core Identity](https://learn.microsoft.com/aspnet/core/security/authentication/identity) und [OpenIddict](https://documentation.openiddict.com/). Daten liegen in SQLite (Standard) oder PostgreSQL.
 
 ## Funktionen
 
@@ -26,13 +26,9 @@ OpenID-Connect- und OAuth-2.0-Server auf Basis von ASP.NET Core (.NET 10), [ASP.
 
 ## Schnellstart
 
-Voraussetzungen: .NET 10 SDK und PostgreSQL.
+Voraussetzung: .NET 10 SDK.
 
 ```bash
-# Datenbank für die Entwicklung (oder: docker compose up postgres)
-createuser -P identity   # Passwort: identity
-createdb -O identity identity
-
 dotnet run --project src/Identity.Server --launch-profile http
 ```
 
@@ -45,9 +41,9 @@ Der Server läuft auf http://localhost:5001. `appsettings.Development.json` legt
 | Client `demo-web` | Authorization Code, Secret `dev-secret-change-me`, Redirect `http://localhost:5010/signin-oidc` |
 | Client `demo-service` | Client Credentials, Secret `dev-secret-change-me` |
 
-Alternativ alles in Containern: `docker compose up --build`.
+Alternativ im Container: `docker compose up --build`.
 
-In der Entwicklung signiert der Server mit Entwicklungszertifikaten aus dem Zertifikatspeicher des Benutzers, Mails landen im Log.
+In der Entwicklung liegt die Datenbank in `src/Identity.Server/identity-dev.db`, der Server signiert mit Entwicklungszertifikaten aus dem Zertifikatspeicher des Benutzers, Mails landen im Log.
 
 ## Konfiguration
 
@@ -55,7 +51,8 @@ Alle Einstellungen gehen auch als Umgebungsvariablen, z.B. `Server__Issuer` oder
 
 | Abschnitt | Wofür |
 | --- | --- |
-| `ConnectionStrings:Identity` | PostgreSQL-Verbindung |
+| `Database:Provider` | `Sqlite` (Standard) oder `Postgres` |
+| `ConnectionStrings:Identity` | z.B. `Data Source=/var/lib/identity/identity.db` oder `Host=…;Database=identity;Username=…;Password=…` |
 | `Server` | `Issuer` (öffentliche URL), `DisplayName`, `AllowRegistration`, `RequireConfirmedEmail`, `RequireHttps`, `UseForwardedHeaders` (hinter Reverse Proxy), `MigrateDatabaseOnStartup` |
 | `Keys` | Zertifikate für Signatur und Verschlüsselung (siehe unten) |
 | `Seed` | Erster Admin, Rollen, Scopes und Clients. Wird nur angelegt, wenn es fehlt; Änderungen aus der Verwaltung bleiben erhalten |
@@ -100,6 +97,34 @@ done
 
 Zum Wechseln ein neues Zertifikat **zusätzlich** eintragen: Veröffentlicht werden alle, signiert wird mit dem neuesten gültigen. Das alte erst entfernen, wenn die damit signierten Tokens abgelaufen sind. Das erste Verschlüsselungszertifikat schützt außerdem die Data-Protection-Schlüssel (Cookies) in der Datenbank.
 
+## Betrieb auf Proxmox (LXC mit Tailscale)
+
+`deploy/proxmox/create-lxc.sh` legt auf einem Proxmox-Host einen Ubuntu-24.04-Container an und richtet darin alles ein: .NET 10, den Server als systemd-Dienst mit SQLite, selbst erzeugte Token-Zertifikate und Tailscale. Erreichbar ist der Server danach per HTTPS unter `https://<name>.<tailnet>.ts.net` (über `tailscale serve`, in der Tailscale-Adminkonsole muss HTTPS aktiviert sein).
+
+```bash
+# auf dem Proxmox-Host als root
+curl -fsSLO https://raw.githubusercontent.com/Marcel-B/Identity/main/deploy/proxmox/create-lxc.sh
+TS_AUTHKEY=tskey-auth-… ADMIN_EMAIL=du@example.com bash create-lxc.sh
+```
+
+| Variable | Standard | Bedeutung |
+| --- | --- | --- |
+| `CTID` | nächste freie | Container-ID |
+| `CT_HOSTNAME` | `identity` | Hostname und Tailscale-Name |
+| `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / `local` | Speicher für Disk und Template |
+| `BRIDGE`, `IP`, `GATEWAY` | `vmbr0`, `dhcp`, – | Netzwerk |
+| `CORES`, `MEMORY`, `DISK` | `2`, `2048`, `10` | Ressourcen (MiB, GiB) |
+| `TS_AUTHKEY` | – | Ohne Key druckt Tailscale einen Login-Link |
+| `TS_FUNNEL` | `0` | `1` macht den Server per Tailscale Funnel auch aus dem Internet erreichbar |
+| `ADMIN_EMAIL` | `admin@example.com` | Erster Admin; das Passwort wird erzeugt und am Ende einmal angezeigt |
+| `REPO_URL`, `REPO_BRANCH`, `GIT_TOKEN` | dieses Repo, `main`, – | Quelle; Token nur für private Repos |
+
+Im Container:
+- Einstellungen in `/etc/identity/identity.env` (z.B. SMTP, externe Logins), danach `systemctl restart identity`
+- Neuen Stand bauen und starten: `identity-update`
+- Logs: `journalctl -u identity -f`
+- Backup: `sqlite3 /var/lib/identity/identity.db ".backup /root/identity-backup.db"`, dazu `/etc/identity` sichern (Zertifikate)
+
 ## Anbindung einer Anwendung (ASP.NET Core)
 
 ```csharp
@@ -128,12 +153,21 @@ Eine API prüft das Access Token mit `AddJwtBearer` (`Authority` = Issuer, `Audi
 ## Entwicklung
 
 ```bash
-dotnet test                         # braucht PostgreSQL, siehe unten
-dotnet tool restore
-dotnet ef migrations add <Name> -p src/Identity.Server -o Data/Migrations
+dotnet test                                     # mit SQLite
+IDENTITY_TEST_DATABASE=Postgres dotnet test     # mit PostgreSQL
 ```
 
-Die Integrationstests legen pro Testklasse eine eigene Datenbank an und löschen sie danach. Den Server gibt `IDENTITY_TEST_POSTGRES` vor (Standard: `Host=localhost;Port=5432;Username=postgres;Password=postgres`).
+Die Integrationstests legen pro Testklasse eine eigene Datenbank an und löschen sie danach. Für PostgreSQL gibt `IDENTITY_TEST_POSTGRES` den Server vor (Standard: `Host=localhost;Port=5432;Username=postgres;Password=postgres`).
+
+Jede Datenbank hat eigene Migrationen. Nach einer Modelländerung beide erzeugen:
+
+```bash
+dotnet tool restore
+Database__Provider=Sqlite ConnectionStrings__Identity="Data Source=design.db" \
+  dotnet ef migrations add <Name> -p src/Identity.Server --context SqliteApplicationDbContext -o Data/Migrations/Sqlite
+Database__Provider=Postgres ConnectionStrings__Identity="Host=localhost" \
+  dotnet ef migrations add <Name> -p src/Identity.Server --context PostgresApplicationDbContext -o Data/Migrations/Postgres
+```
 
 ## Aufbau
 
@@ -145,5 +179,6 @@ src/Identity.Server
   Pages/         Anmeldung, Konto, Verwaltung (Razor Pages)
   Services/      Mails, Token-Schlüssel
   Views/         Zustimmung und Abmeldung
-tests/Identity.Server.Tests   Integrationstests gegen PostgreSQL
+tests/Identity.Server.Tests   Integrationstests (SQLite oder PostgreSQL)
+deploy/proxmox                LXC-Container auf Proxmox anlegen
 ```

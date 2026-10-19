@@ -23,7 +23,14 @@ public sealed class DatabaseInitializer(
 
         if (serverOptions.Value.MigrateDatabaseOnStartup)
         {
-            await provider.GetRequiredService<ApplicationDbContext>().Database.MigrateAsync(cancellationToken);
+            var database = provider.GetRequiredService<ApplicationDbContext>().Database;
+            await database.MigrateAsync(cancellationToken);
+
+            if (database.IsSqlite())
+            {
+                // Lets readers continue while a write is in progress. Stored in the database file.
+                await database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+            }
         }
 
         var seed = seedOptions.Value;

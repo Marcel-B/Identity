@@ -33,7 +33,7 @@ public sealed class IndexModel(UserManager<ApplicationUser> userManager) : PageM
             users = users.Where(user =>
                 EF.Functions.Like(user.NormalizedEmail!, pattern) ||
                 EF.Functions.Like(user.NormalizedUserName!, pattern) ||
-                (user.DisplayName != null && EF.Functions.ILike(user.DisplayName, pattern)));
+                (user.DisplayName != null && EF.Functions.Like(user.DisplayName.ToUpper(), pattern)));
         }
 
         Total = await users.CountAsync();
