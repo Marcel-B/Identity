@@ -28,9 +28,21 @@ builder.Services.Configure<EmailOptions>(configuration.GetSection(EmailOptions.S
 // Registered first so the database is migrated and seeded before the web server starts.
 builder.Services.AddHostedService<DatabaseInitializer>();
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(configuration.GetConnectionString("Identity")
-        ?? throw new InvalidOperationException("Connection string 'Identity' is missing.")));
+var databaseOptions = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new();
+var connectionString = configuration.GetConnectionString("Identity") is { Length: > 0 } value
+    ? value
+    : throw new InvalidOperationException("Connection string 'Identity' is missing.");
+
+switch (databaseOptions.Provider)
+{
+    case DatabaseProvider.Sqlite:
+        builder.Services.AddDbContext<ApplicationDbContext, SqliteApplicationDbContext>(options => options.UseSqlite(connectionString));
+        break;
+
+    case DatabaseProvider.Postgres:
+        builder.Services.AddDbContext<ApplicationDbContext, PostgresApplicationDbContext>(options => options.UseNpgsql(connectionString));
+        break;
+}
 
 var dataProtection = builder.Services.AddDataProtection()
     .SetApplicationName("Identity.Server")

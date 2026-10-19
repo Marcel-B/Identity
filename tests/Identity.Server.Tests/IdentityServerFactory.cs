@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Identity.Server.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
@@ -9,8 +10,9 @@ using Npgsql;
 namespace Identity.Server.Tests;
 
 /// <summary>
-/// Runs the server against its own, freshly migrated PostgreSQL database.
-/// The server is taken from IDENTITY_TEST_POSTGRES (default: postgres/postgres on localhost).
+/// Runs the server against its own, freshly migrated database: a temporary SQLite file by default, or
+/// PostgreSQL with IDENTITY_TEST_DATABASE=Postgres. The PostgreSQL server is taken from
+/// IDENTITY_TEST_POSTGRES (default: postgres/postgres on localhost).
 /// </summary>
 public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
@@ -18,11 +20,16 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     public const string AdminPassword = "Admin12345!";
     public const string ClientSecret = "test-secret";
 
+    private static readonly bool UsePostgres =
+        string.Equals(Environment.GetEnvironmentVariable("IDENTITY_TEST_DATABASE"), "Postgres", StringComparison.OrdinalIgnoreCase);
+
     private static readonly string ServerConnectionString =
         Environment.GetEnvironmentVariable("IDENTITY_TEST_POSTGRES")
         ?? "Host=localhost;Port=5432;Username=postgres;Password=postgres";
 
     private readonly string _database = $"identity_test_{Guid.NewGuid():N}";
+
+    private string SqlitePath => Path.Combine(Path.GetTempPath(), $"{_database}.db");
 
     public CapturingEmailSender Emails { get; } = new();
 
@@ -39,7 +46,10 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
 
         var settings = new Dictionary<string, string?>
         {
-            ["ConnectionStrings:Identity"] = new NpgsqlConnectionStringBuilder(ServerConnectionString) { Database = _database }.ConnectionString,
+            ["Database:Provider"] = UsePostgres ? "Postgres" : "Sqlite",
+            ["ConnectionStrings:Identity"] = UsePostgres
+                ? new NpgsqlConnectionStringBuilder(ServerConnectionString) { Database = _database }.ConnectionString
+                : $"Data Source={SqlitePath}",
             ["Logging:LogLevel:Default"] = "Warning",
 
             // Creating the test database logs a connection error for the database that does not exist yet.
@@ -88,6 +98,17 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
+
+        if (!UsePostgres)
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var file in new[] { SqlitePath, SqlitePath + "-wal", SqlitePath + "-shm" })
+            {
+                File.Delete(file);
+            }
+
+            return;
+        }
 
         NpgsqlConnection.ClearAllPools();
         await using var connection = new NpgsqlConnection(ServerConnectionString);
