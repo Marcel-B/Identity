@@ -22,7 +22,7 @@ MEMORY="${MEMORY:-2048}"                      # MiB; the build needs about 1.5 G
 DISK="${DISK:-10}"                            # GiB
 SSH_PUBLIC_KEY_FILE="${SSH_PUBLIC_KEY_FILE:-}" # optional, for root login via SSH
 
-TS_AUTHKEY="${TS_AUTHKEY:-}"                  # empty: log in through the link Tailscale prints
+TS_AUTHKEY="${TS_AUTHKEY:-}"                  # auth key (tskey-auth-...); empty: log in through the link Tailscale prints
 TS_FUNNEL="${TS_FUNNEL:-0}"                   # 1: also reachable from the internet (Tailscale Funnel)
 
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
@@ -36,38 +36,54 @@ die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "Run as root on the Proxmox host."
 command -v pct >/dev/null || die "pct not found. This script must run on a Proxmox VE host."
 
-CTID="${CTID:-$(pvesh get /cluster/nextid)}"
-pct status "$CTID" &>/dev/null && die "Container $CTID already exists."
+case $TS_AUTHKEY in
+    "" | tskey-auth-*) ;;
+    tskey-api-*) die "TS_AUTHKEY is an API access token. Create an auth key instead: Tailscale admin console > Settings > Keys > Generate auth key (tskey-auth-...)." ;;
+    *) die "TS_AUTHKEY must be an auth key starting with tskey-auth-." ;;
+esac
 
-log "Fetching the Ubuntu 24.04 template"
-pveam update >/dev/null
-TEMPLATE="$(pveam available --section system | awk '/ubuntu-24.04-standard/ {print $2}' | sort -V | tail -n1)"
-[[ -n $TEMPLATE ]] || die "No ubuntu-24.04-standard template available."
-if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
-    pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
+CTID="${CTID:-$(pvesh get /cluster/nextid)}"
+RESUME=0
+if pct status "$CTID" &>/dev/null; then
+    # Running the script again with the same CTID finishes a setup that stopped half way.
+    pct config "$CTID" | grep -qx "hostname: $CT_HOSTNAME" ||
+        die "Container $CTID already exists and is not named $CT_HOSTNAME."
+    RESUME=1
 fi
 
-log "Creating container $CTID ($CT_HOSTNAME)"
-NET="name=eth0,bridge=$BRIDGE,ip=$IP"
-[[ -n $GATEWAY ]] && NET+=",gw=$GATEWAY"
-CREATE_ARGS=(
-    --hostname "$CT_HOSTNAME"
-    --cores "$CORES" --memory "$MEMORY" --swap 512
-    --rootfs "$STORAGE:$DISK"
-    --net0 "$NET"
-    --ostype ubuntu --unprivileged 1 --features nesting=1
-    --onboot 1 --timezone host
-)
-[[ -n $SSH_PUBLIC_KEY_FILE ]] && CREATE_ARGS+=(--ssh-public-keys "$SSH_PUBLIC_KEY_FILE")
-pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" "${CREATE_ARGS[@]}"
+if [[ $RESUME == 1 ]]; then
+    log "Continuing the setup of container $CTID ($CT_HOSTNAME)"
+else
+    log "Fetching the Ubuntu 24.04 template"
+    pveam update >/dev/null
+    TEMPLATE="$(pveam available --section system | awk '/ubuntu-24.04-standard/ {print $2}' | sort -V | tail -n1)"
+    [[ -n $TEMPLATE ]] || die "No ubuntu-24.04-standard template available."
+    if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
+        pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
+    fi
 
-# Tailscale needs the TUN device, which unprivileged containers do not get by default.
-cat >>"/etc/pve/lxc/$CTID.conf" <<'EOF'
+    log "Creating container $CTID ($CT_HOSTNAME)"
+    NET="name=eth0,bridge=$BRIDGE,ip=$IP"
+    [[ -n $GATEWAY ]] && NET+=",gw=$GATEWAY"
+    CREATE_ARGS=(
+        --hostname "$CT_HOSTNAME"
+        --cores "$CORES" --memory "$MEMORY" --swap 512
+        --rootfs "$STORAGE:$DISK"
+        --net0 "$NET"
+        --ostype ubuntu --unprivileged 1 --features nesting=1
+        --onboot 1 --timezone host
+    )
+    [[ -n $SSH_PUBLIC_KEY_FILE ]] && CREATE_ARGS+=(--ssh-public-keys "$SSH_PUBLIC_KEY_FILE")
+    pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" "${CREATE_ARGS[@]}"
+
+    # Tailscale needs the TUN device, which unprivileged containers do not get by default.
+    cat >>"/etc/pve/lxc/$CTID.conf" <<'EOF'
 lxc.cgroup2.devices.allow: c 10:200 rwm
 lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 EOF
+fi
 
-pct start "$CTID"
+pct status "$CTID" | grep -q running || pct start "$CTID"
 
 log "Waiting for the network"
 for _ in $(seq 1 60); do
@@ -103,9 +119,8 @@ if ! command -v tailscale >/dev/null; then
 fi
 systemctl enable --now tailscaled
 if ! tailscale status &>/dev/null; then
-    if [[ -n $TS_AUTHKEY ]]; then
-        tailscale up --authkey "$TS_AUTHKEY" --hostname "$CT_HOSTNAME"
-    else
+    if [[ -z $TS_AUTHKEY ]] || ! tailscale up --authkey "$TS_AUTHKEY" --hostname "$CT_HOSTNAME"; then
+        [[ -n $TS_AUTHKEY ]] && echo "Tailscale rejected the auth key (expired, used up or revoked?). Falling back to the login link."
         echo "Open the link below to add this container to your tailnet:"
         tailscale up --hostname "$CT_HOSTNAME"
     fi
@@ -278,6 +293,7 @@ log "Provisioning the container"
 pct exec "$CTID" -- env \
     CT_HOSTNAME="$CT_HOSTNAME" TS_AUTHKEY="$TS_AUTHKEY" TS_FUNNEL="$TS_FUNNEL" \
     ADMIN_EMAIL="$ADMIN_EMAIL" REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" GIT_TOKEN="$GIT_TOKEN" \
-    bash /root/provision-identity.sh
+    bash /root/provision-identity.sh ||
+    die "Setup of container $CTID stopped. Fix the cause and run the script again with CTID=$CTID to continue."
 
 log "Container $CTID is ready"

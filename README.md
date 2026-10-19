@@ -114,10 +114,12 @@ TS_AUTHKEY=tskey-auth-… ADMIN_EMAIL=du@example.com bash create-lxc.sh
 | `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / `local` | Speicher für Disk und Template |
 | `BRIDGE`, `IP`, `GATEWAY` | `vmbr0`, `dhcp`, – | Netzwerk |
 | `CORES`, `MEMORY`, `DISK` | `2`, `2048`, `10` | Ressourcen (MiB, GiB) |
-| `TS_AUTHKEY` | – | Ohne Key druckt Tailscale einen Login-Link |
+| `TS_AUTHKEY` | – | Auth Key (`tskey-auth-…`, Adminkonsole > Settings > Keys > *Generate auth key*), kein API-Token. Ohne Key oder wenn Tailscale ihn ablehnt, druckt Tailscale einen Login-Link |
 | `TS_FUNNEL` | `0` | `1` macht den Server per Tailscale Funnel auch aus dem Internet erreichbar |
 | `ADMIN_EMAIL` | `admin@example.com` | Erster Admin; das Passwort wird erzeugt und am Ende einmal angezeigt |
 | `REPO_URL`, `REPO_BRANCH`, `GIT_TOKEN` | dieses Repo, `main`, – | Quelle; Token nur für private Repos |
+
+Bricht die Einrichtung ab, das Skript mit derselben `CTID` erneut starten: Der vorhandene Container wird weiter eingerichtet, Schlüssel, Einstellungen und Datenbank bleiben erhalten.
 
 Im Container:
 - Einstellungen in `/etc/identity/identity.env` (z.B. SMTP, externe Logins), danach `systemctl restart identity`
