@@ -1,0 +1,59 @@
+@page
+@model PasskeysModel
+@{
+    ViewData["Title"] = "Passkeys";
+    ViewData["ManagePage"] = "passkeys";
+}
+<h1>Mein Konto</h1>
+<partial name="_ManageNav" />
+<div class="card">
+    <h2>Passkeys</h2>
+    <p>Mit einem Passkey meldest du dich per Fingerabdruck, Gesichtserkennung, Geräte-PIN oder Sicherheitsschlüssel an, ganz ohne Passwort.</p>
+
+    @if (Model.Passkeys.Count > 0)
+    {
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Name</th><th>Angelegt</th><th>Synchronisiert</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var passkey in Model.Passkeys)
+                    {
+                        <tr>
+                            <td>@passkey.Name</td>
+                            <td>@passkey.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@(passkey.IsBackedUp ? "ja" : "nein")</td>
+                            <td>
+                                <form method="post" asp-page-handler="Remove" asp-route-id="@PasskeysModel.IdOf(passkey)" class="inline">
+                                    <button type="submit" class="danger">Entfernen</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="muted">Noch keine Passkeys.</p>
+    }
+
+    <form method="post" asp-page-handler="Add" id="passkey-form">
+        <input type="hidden" asp-for="Credential" />
+        <label asp-for="Name"></label>
+        <input asp-for="Name" placeholder="z.B. MacBook oder YubiKey" />
+    </form>
+    <p class="message error" id="passkey-unsupported" hidden>Dieser Browser unterstützt keine Passkeys.</p>
+    <div class="actions"><button type="button" id="passkey-add">Passkey hinzufügen</button></div>
+</div>
+
+@section Scripts {
+    <script src="~/js/passkey.js" asp-append-version="true"></script>
+    <script>
+        Passkey.setupRegistration(
+            document.getElementById("passkey-add"),
+            document.getElementById("passkey-form"),
+            "@Url.Action("CreationOptions", "Passkey")",
+            document.getElementById("passkey-unsupported"));
+    </script>
+}

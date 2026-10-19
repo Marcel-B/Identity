@@ -1,0 +1,51 @@
+@page
+@model TwoFactorModel
+@{
+    ViewData["Title"] = "Zwei-Faktor-Anmeldung";
+    ViewData["ManagePage"] = "2fa";
+}
+<h1>Mein Konto</h1>
+<partial name="_ManageNav" />
+
+@if (Model.NewRecoveryCodes is not null)
+{
+    <div class="card">
+        <h2>Deine neuen Wiederherstellungscodes</h2>
+        <p>Bewahre sie sicher auf. Jeder Code funktioniert einmal, falls du keinen Zugriff auf die Authenticator-App hast. Sie werden nicht noch einmal angezeigt.</p>
+        <div class="codes">
+            @foreach (var code in Model.NewRecoveryCodes)
+            {
+                <code>@code</code>
+            }
+        </div>
+    </div>
+}
+
+<div class="card">
+    <h2>Zwei-Faktor-Anmeldung</h2>
+    @if (Model.Enabled)
+    {
+        <p>Eingeschaltet. Bei der Anmeldung mit Passwort fragen wir zusätzlich nach einem Code aus deiner Authenticator-App.</p>
+        <p class="muted">Übrige Wiederherstellungscodes: @Model.RecoveryCodesLeft</p>
+        <div class="actions">
+            <a class="button secondary" asp-page="./EnableAuthenticator">Weitere App einrichten</a>
+            <form method="post" asp-page-handler="GenerateRecoveryCodes" class="inline">
+                <button type="submit" class="secondary">Neue Wiederherstellungscodes</button>
+            </form>
+            @if (Model.IsMachineRemembered)
+            {
+                <form method="post" asp-page-handler="ForgetBrowser" class="inline">
+                    <button type="submit" class="secondary">Diesen Browser vergessen</button>
+                </form>
+            }
+            <form method="post" asp-page-handler="Disable" class="inline">
+                <button type="submit" class="danger">Ausschalten</button>
+            </form>
+        </div>
+    }
+    else
+    {
+        <p>Ausgeschaltet. Mit einer Authenticator-App (z.B. Aegis, 2FAS, Google oder Microsoft Authenticator) schützt du dein Konto, falls jemand dein Passwort kennt.</p>
+        <a class="button" asp-page="./EnableAuthenticator">Einrichten</a>
+    }
+</div>

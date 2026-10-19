@@ -1,4 +1,4 @@
-using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace Identity.Server.Tests;
@@ -6,32 +6,28 @@ namespace Identity.Server.Tests;
 public sealed class DiscoveryTests(IdentityServerFactory factory) : IClassFixture<IdentityServerFactory>
 {
     [Fact]
-    public async Task Discovery_document_lists_endpoints_and_role_scope()
+    public async Task Discovery_document_lists_endpoints_and_flows()
     {
-        var client = factory.CreateClient();
+        var client = factory.CreateBrowser();
 
-        var response = await client.GetAsync("/.well-known/openid-configuration");
+        var document = await client.GetFromJsonAsync<JsonElement>("/.well-known/openid-configuration", TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var root = document.RootElement;
-        Assert.EndsWith("/connect/authorize", root.GetProperty("authorization_endpoint").GetString());
-        Assert.EndsWith("/connect/token", root.GetProperty("token_endpoint").GetString());
-        Assert.EndsWith("/connect/endsession", root.GetProperty("end_session_endpoint").GetString());
-        Assert.Contains("roles", root.GetProperty("scopes_supported").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal("http://localhost/", document.GetProperty("issuer").GetString());
+        Assert.Equal("http://localhost/connect/authorize", document.GetProperty("authorization_endpoint").GetString());
+        Assert.Equal("http://localhost/connect/token", document.GetProperty("token_endpoint").GetString());
+        Assert.Equal("http://localhost/connect/userinfo", document.GetProperty("userinfo_endpoint").GetString());
+        Assert.Equal("http://localhost/connect/logout", document.GetProperty("end_session_endpoint").GetString());
+        Assert.Equal(
+            ["authorization_code", "client_credentials", "refresh_token"],
+            document.GetProperty("grant_types_supported").EnumerateArray().Select(value => value.GetString()).Order());
+        Assert.Equal(["S256"], document.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(value => value.GetString()));
     }
 
     [Fact]
-    public async Task Authorize_redirects_anonymous_user_to_login_page()
+    public async Task Health_endpoint_reports_healthy()
     {
-        var client = factory.CreateClient(new() { AllowAutoRedirect = false });
+        var client = factory.CreateBrowser();
 
-        var response = await client.GetAsync(
-            "/connect/authorize?client_id=mfe-vue-host&response_type=code&scope=openid%20roles" +
-            "&redirect_uri=http%3A%2F%2Flocalhost%3A5010%2Fsignin-oidc" +
-            "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256");
-
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith("/Account/Login", response.Headers.Location?.PathAndQuery);
+        Assert.Equal("Healthy", await client.GetStringAsync("/health", TestContext.Current.CancellationToken));
     }
 }

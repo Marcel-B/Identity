@@ -1,0 +1,99 @@
+@page "{id?}"
+@model Identity.Server.Pages.Admin.Clients.EditModel
+@using static OpenIddict.Abstractions.OpenIddictConstants
+@{
+    ViewData["Title"] = Model.IsNew ? "Neuer Client" : Model.Input.ClientId;
+    ViewData["AdminPage"] = "clients";
+    var grantLabels = new Dictionary<string, string>
+    {
+        [GrantTypes.AuthorizationCode] = "Authorization Code mit PKCE (Benutzer melden sich an)",
+        [GrantTypes.RefreshToken] = "Refresh Token",
+        [GrantTypes.ClientCredentials] = "Client Credentials (Dienst ohne Benutzer)",
+    };
+}
+<h1>@ViewData["Title"]</h1>
+<partial name="_AdminNav" />
+
+@if (Model.NewSecret is not null)
+{
+    <div class="card">
+        <h2>Client-Secret</h2>
+        <p>Kopiere es jetzt, es wird nur dieses eine Mal angezeigt.</p>
+        <p><code>@Model.NewSecret</code></p>
+    </div>
+}
+
+<div class="card">
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+
+        <label asp-for="Input.ClientId"></label>
+        @if (Model.IsNew)
+        {
+            <input asp-for="Input.ClientId" />
+            <span asp-validation-for="Input.ClientId" class="field-error"></span>
+        }
+        else
+        {
+            <input asp-for="Input.ClientId" readonly />
+        }
+
+        <label asp-for="Input.DisplayName"></label>
+        <input asp-for="Input.DisplayName" />
+
+        @if (Model.IsNew)
+        {
+            <label class="check"><input asp-for="Input.Confidential" /> @Html.DisplayNameFor(m => m.Input.Confidential)</label>
+        }
+        else
+        {
+            <p>Typ: @(Model.IsConfidential ? "vertraulich (mit Secret)" : "öffentlich (ohne Secret, z.B. SPA oder App)")</p>
+        }
+
+        <label asp-for="Input.ConsentType"></label>
+        <select asp-for="Input.ConsentType">
+            <option value="@ConsentTypes.Implicit">Ohne Nachfrage (eigene Anwendungen)</option>
+            <option value="@ConsentTypes.Explicit">Benutzer muss zustimmen (fremde Anwendungen)</option>
+        </select>
+
+        <label>Grant Types</label>
+        @foreach (var (grant, label) in grantLabels)
+        {
+            <label class="check"><input type="checkbox" name="Input.GrantTypes" value="@grant" checked="@Model.Input.GrantTypes.Contains(grant)" /> @label</label>
+        }
+
+        <label asp-for="Input.RedirectUris"></label>
+        <textarea asp-for="Input.RedirectUris"></textarea>
+
+        <label asp-for="Input.PostLogoutRedirectUris"></label>
+        <textarea asp-for="Input.PostLogoutRedirectUris"></textarea>
+
+        <label>API-Scopes</label>
+        @if (Model.AvailableScopes.Count == 0)
+        {
+            <p class="muted">Noch keine Scopes angelegt. <a asp-page="../Scopes/Edit">Scope anlegen</a></p>
+        }
+        @foreach (var scope in Model.AvailableScopes)
+        {
+            <label class="check"><input type="checkbox" name="Input.Scopes" value="@scope" checked="@Model.Input.Scopes.Contains(scope)" /> @scope</label>
+        }
+        <p class="muted">openid, profile, email, roles und offline_access (mit Refresh Token) darf jeder Client mit Authorization Code anfragen.</p>
+
+        <div class="actions"><button type="submit">Speichern</button></div>
+    </form>
+
+    @if (!Model.IsNew)
+    {
+        <div class="actions">
+            @if (Model.IsConfidential)
+            {
+                <form method="post" asp-page-handler="NewSecret" class="inline" onsubmit="return confirm('Neues Secret erzeugen? Das alte wird sofort ungültig.');">
+                    <button type="submit" class="secondary">Neues Secret erzeugen</button>
+                </form>
+            }
+            <form method="post" asp-page-handler="Delete" class="inline" onsubmit="return confirm('Client löschen? Alle seine Tokens werden widerrufen.');">
+                <button type="submit" class="danger">Löschen</button>
+            </form>
+        </div>
+    }
+</div>

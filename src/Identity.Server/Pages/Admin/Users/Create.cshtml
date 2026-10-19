@@ -1,0 +1,32 @@
+@page
+@model Identity.Server.Pages.Admin.Users.CreateModel
+@{
+    ViewData["Title"] = "Neuer Benutzer";
+    ViewData["AdminPage"] = "users";
+}
+<h1>Neuer Benutzer</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label asp-for="Input.Email"></label>
+        <input asp-for="Input.Email" />
+        <span asp-validation-for="Input.Email" class="field-error"></span>
+
+        <label asp-for="Input.DisplayName"></label>
+        <input asp-for="Input.DisplayName" />
+
+        <label asp-for="Input.Password"></label>
+        <input asp-for="Input.Password" autocomplete="new-password" />
+
+        <label class="check"><input asp-for="Input.EmailConfirmed" /> @Html.DisplayNameFor(m => m.Input.EmailConfirmed)</label>
+
+        <label>Rollen</label>
+        @foreach (var role in Model.AllRoles)
+        {
+            <label class="check"><input type="checkbox" name="Input.Roles" value="@role" checked="@Model.Input.Roles.Contains(role)" /> @role</label>
+        }
+
+        <div class="actions"><button type="submit">Anlegen</button></div>
+    </form>
+</div>

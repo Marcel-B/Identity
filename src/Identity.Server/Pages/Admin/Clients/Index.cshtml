@@ -1,0 +1,27 @@
+@page
+@model Identity.Server.Pages.Admin.Clients.IndexModel
+@{
+    ViewData["Title"] = "Clients";
+    ViewData["AdminPage"] = "clients";
+}
+<h1>Clients</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Client-ID</th><th>Name</th><th>Typ</th><th>Grant Types</th></tr></thead>
+            <tbody>
+                @foreach (var client in Model.Clients)
+                {
+                    <tr>
+                        <td><a asp-page="./Edit" asp-route-id="@client.Id">@client.ClientId</a></td>
+                        <td>@client.DisplayName</td>
+                        <td>@client.ClientType</td>
+                        <td>@string.Join(", ", client.GrantTypes)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions"><a class="button" asp-page="./Edit">Neuer Client</a></div>
+</div>

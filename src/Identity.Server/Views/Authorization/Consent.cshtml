@@ -1,0 +1,27 @@
+@model ConsentViewModel
+@{
+    ViewData["Title"] = "Zugriff erlauben";
+}
+<div class="card">
+    <h1>Zugriff erlauben?</h1>
+    <p><strong>@Model.ApplicationName</strong> möchte:</p>
+    <ul>
+        @foreach (var scope in Model.Scopes)
+        {
+            <li>@scope</li>
+        }
+    </ul>
+    <form method="post" asp-controller="Authorization" asp-action="Accept">
+        @foreach (var parameter in Model.Parameters)
+        {
+            foreach (var value in parameter.Value)
+            {
+                <input type="hidden" name="@parameter.Key" value="@value" />
+            }
+        }
+        <div class="actions">
+            <button type="submit" name="submit.Accept" value="yes">Erlauben</button>
+            <button type="submit" name="submit.Deny" value="no" class="secondary">Ablehnen</button>
+        </div>
+    </form>
+</div>

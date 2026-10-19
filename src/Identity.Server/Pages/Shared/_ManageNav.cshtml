@@ -1,0 +1,11 @@
+@{
+    var current = ViewData["ManagePage"] as string;
+    string Active(string page) => page == current ? "active" : "";
+}
+<nav class="tabs">
+    <a class="@Active("profile")" asp-page="/Account/Manage/Index">Profil</a>
+    <a class="@Active("password")" asp-page="/Account/Manage/Password">Passwort</a>
+    <a class="@Active("2fa")" asp-page="/Account/Manage/TwoFactor">Zwei-Faktor</a>
+    <a class="@Active("passkeys")" asp-page="/Account/Manage/Passkeys">Passkeys</a>
+    <a class="@Active("logins")" asp-page="/Account/Manage/ExternalLogins">Externe Konten</a>
+</nav>

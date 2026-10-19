@@ -3,37 +3,59 @@
 @{
     ViewData["Title"] = "Anmelden";
 }
+<div class="card">
+    <h1>Anmelden</h1>
+    <form method="post" id="login-form">
+        <div asp-validation-summary="ModelOnly"></div>
+        <input type="hidden" asp-for="ReturnUrl" />
 
-<form method="post">
-    <input type="hidden" asp-for="ReturnUrl" />
+        <label asp-for="Input.Login"></label>
+        <input asp-for="Input.Login" autocomplete="username webauthn" autofocus />
+        <span asp-validation-for="Input.Login" class="field-error"></span>
 
-    @if (Model.ErrorMessage is not null)
+        <label asp-for="Input.Password"></label>
+        <input asp-for="Input.Password" autocomplete="current-password" />
+        <span asp-validation-for="Input.Password" class="field-error"></span>
+
+        <label class="check"><input asp-for="Input.RememberMe" /> @Html.DisplayNameFor(m => m.Input.RememberMe)</label>
+
+        <button type="submit" class="block">Anmelden</button>
+    </form>
+
+    <form method="post" asp-page-handler="Passkey" id="passkey-form" hidden>
+        <input type="hidden" asp-for="ReturnUrl" />
+        <input type="hidden" asp-for="PasskeyCredential" />
+    </form>
+    <button type="button" class="secondary block" id="passkey-login" hidden>Mit Passkey anmelden</button>
+
+    @if (Model.ExternalProviders.Count > 0)
     {
-        <p class="error" role="alert">@Model.ErrorMessage</p>
+        <p class="divider">oder weiter mit</p>
+        <form method="post" asp-controller="ExternalLogin" asp-action="Challenge" class="actions">
+            <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
+            @foreach (var provider in Model.ExternalProviders)
+            {
+                <button type="submit" name="provider" value="@provider" class="secondary">@provider</button>
+            }
+        </form>
     }
 
-    <div class="field">
-        <label asp-for="UserName">Benutzername</label>
-        <input asp-for="UserName" type="text" autocomplete="username" autofocus />
+    <div class="actions">
+        <a asp-page="./ForgotPassword">Passwort vergessen?</a>
+        @if (Model.AllowRegistration)
+        {
+            <a asp-page="./Register" asp-route-returnUrl="@Model.ReturnUrl">Konto erstellen</a>
+        }
+        <a asp-page="./ResendEmailConfirmation">Bestätigungsmail erneut senden</a>
     </div>
-    <div class="field">
-        <label asp-for="Password">Passwort</label>
-        <input asp-for="Password" type="password" autocomplete="current-password" />
-    </div>
-    <label class="checkbox"><input asp-for="RememberMe" /> Angemeldet bleiben</label>
+</div>
 
-    <button type="submit">Anmelden</button>
-</form>
-
-@if (Model.DemoUsers.Count > 0)
-{
-    <div class="hint">
-        Testbenutzer (nur Development):
-        <ul>
-            @foreach (var user in Model.DemoUsers)
-            {
-                <li><code>@user.UserName</code> / <code>@user.Password</code> (@string.Join(", ", user.Roles))</li>
-            }
-        </ul>
-    </div>
+@section Scripts {
+    <script src="~/js/passkey.js" asp-append-version="true"></script>
+    <script>
+        Passkey.setupLogin(
+            document.getElementById("passkey-login"),
+            document.getElementById("passkey-form"),
+            "@Url.Action("RequestOptions", "Passkey")");
+    </script>
 }

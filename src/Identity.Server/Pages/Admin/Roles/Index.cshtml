@@ -1,0 +1,40 @@
+@page
+@model Identity.Server.Pages.Admin.Roles.IndexModel
+@{
+    ViewData["Title"] = "Rollen";
+    ViewData["AdminPage"] = "roles";
+}
+<h1>Rollen</h1>
+<partial name="_AdminNav" />
+<div class="card">
+    <p class="muted">Rollen landen als <code>role</code>-Claim im Access Token und, mit Scope <code>roles</code>, im ID Token.</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Rolle</th><th>Mitglieder</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var (name, members) in Model.Roles)
+                {
+                    <tr>
+                        <td>@name</td>
+                        <td>@members</td>
+                        <td>
+                            @if (name != DatabaseInitializer.AdminRole)
+                            {
+                                <form method="post" asp-page-handler="Delete" class="inline" onsubmit="return confirm('Rolle löschen?');">
+                                    <input type="hidden" name="name" value="@name" />
+                                    <button type="submit" class="danger">Löschen</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <form method="post">
+        <label asp-for="Name"></label>
+        <input asp-for="Name" />
+        <span asp-validation-for="Name" class="field-error"></span>
+        <div class="actions"><button type="submit">Anlegen</button></div>
+    </form>
+</div>

@@ -1,16 +1,20 @@
 @page
-@model IndexModel
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
 @{
     ViewData["Title"] = "Start";
 }
-
-@if (User.Identity?.IsAuthenticated == true)
-{
-    <p>Angemeldet als <strong>@User.Identity.Name</strong>.</p>
-    <form method="post"><button type="submit">Abmelden</button></form>
-}
-else
-{
-    <p>Nicht angemeldet.</p>
-    <a href="/Account/Login">Zur Anmeldung</a>
-}
+<div class="card">
+    @if (SignInManager.IsSignedIn(User))
+    {
+        <h1>Hallo @(User.Identity?.Name)</h1>
+        <p>Du bist angemeldet. Unter <a asp-page="/Account/Manage/Index">Mein Konto</a> verwaltest du Passwort, Zwei-Faktor-Anmeldung, Passkeys und verknüpfte Konten.</p>
+    }
+    else
+    {
+        <h1>Willkommen</h1>
+        <p>Dies ist der Anmeldedienst. Anwendungen leiten dich zur Anmeldung hierher weiter.</p>
+        <a class="button" asp-page="/Account/Login">Anmelden</a>
+    }
+</div>
+<p class="muted">OpenID-Connect-Konfiguration: <a href="~/.well-known/openid-configuration">/.well-known/openid-configuration</a></p>
