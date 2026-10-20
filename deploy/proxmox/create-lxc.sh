@@ -443,6 +443,167 @@ done
 EOF
 chmod 755 /usr/local/bin/identity-backup
 
+cat >/usr/local/bin/identity-restore <<'EOF'
+#!/usr/bin/env bash
+# Restores a backup made by identity-backup.
+#   identity-restore --list                   list the archives in the Nextcloud folder
+#   identity-restore identity-mon.zip         download that archive from Nextcloud and restore the database
+#   identity-restore /root/identity-mon.zip   restore from a local file (.zip or .zip.enc)
+# Options:
+#   --with-config  also restore the certificates and identity.env from the archive (for a new container);
+#                  Server__Issuer of this container is kept
+#   --yes          do not ask before replacing the database
+# The current database (and with --with-config the current settings) is kept next to it first; if the
+# server does not come up healthy with the restored state, that copy is put back.
+set -euo pipefail
+CONF_DIR=/etc/identity
+
+usage() { sed -n '2,12s/^# \{0,1\}//p' "$0"; exit "${1:-0}"; }
+die() { echo "$*" >&2; exit 1; }
+
+with_config=0 yes=0 list=0 source=""
+for arg in "$@"; do
+    case $arg in
+        --with-config) with_config=1 ;;
+        --yes) yes=1 ;;
+        --list) list=1 ;;
+        -h | --help) usage ;;
+        -*) usage 1 ;;
+        *) [[ -z $source ]] || usage 1; source=$arg ;;
+    esac
+done
+[[ $list == 1 || -n $source ]] || usage 1
+
+setting() { if [[ -f $2 ]]; then sed -n "s/^$1=//p" "$2" | tail -n1; fi; }
+url="${NEXTCLOUD_WEBDAV_URL:-$(setting NEXTCLOUD_WEBDAV_URL "$CONF_DIR/backup.env")}"
+user="${NEXTCLOUD_USERNAME:-$(setting NEXTCLOUD_USERNAME "$CONF_DIR/backup.env")}"
+password="${NEXTCLOUD_APP_PASSWORD:-$(setting NEXTCLOUD_APP_PASSWORD "$CONF_DIR/backup.env")}"
+passphrase="${BACKUP_PASSPHRASE:-$(setting BACKUP_PASSPHRASE "$CONF_DIR/backup.env")}"
+url="${url%/}"
+
+# Credentials go to curl on stdin, not on the command line where ps would show them.
+webdav() {
+    [[ -n $url && -n $user && -n $password ]] ||
+        die "No Nextcloud access in $CONF_DIR/backup.env; pass the path of a local archive instead."
+    printf 'user = "%s"\n' "$(printf '%s:%s' "$user" "$password" | sed 's/[\\"]/\\&/g')" |
+        curl -sS -K - --connect-timeout 30 --max-time 300 "$@"
+}
+
+if [[ $list == 1 ]]; then
+    webdav -f -X PROPFIND -H 'Depth: 1' "$url/" |
+        grep -o '<d:href>[^<]*</d:href>' | sed 's#.*/\([^/<]*\)</d:href>#\1#' |
+        grep -E '^identity-.*\.zip(\.enc)?$' | sort || die "No archives found in $url."
+    exit 0
+fi
+
+provider="$(setting Database__Provider "$CONF_DIR/identity.env")"
+[[ ${provider:-Sqlite} == Sqlite ]] || die "Only SQLite can be restored, the server uses $provider."
+db="$(setting ConnectionStrings__Identity "$CONF_DIR/identity.env" | sed -n 's/.*Data Source=\([^;]*\).*/\1/p')"
+db="${db:-/var/lib/identity/identity.db}"
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+archive="$scratch/$(basename "$source")"
+if [[ -f $source ]]; then
+    cp "$source" "$archive"
+else
+    [[ $source != */* ]] || die "$source not found."
+    echo "Downloading $source"
+    webdav -f -o "$archive" "$url/$source" || die "Cannot download $source from $url (identity-restore --list shows the archives)."
+fi
+
+if [[ $archive == *.enc ]]; then
+    if [[ -z $passphrase ]]; then
+        read -rsp "Passphrase: " passphrase
+        echo
+    fi
+    BACKUP_PASSPHRASE="$passphrase" openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+        -in "$archive" -out "${archive%.enc}" -pass env:BACKUP_PASSPHRASE 2>/dev/null ||
+        die "Cannot decrypt $source: wrong passphrase?"
+    archive="${archive%.enc}"
+fi
+unzip -q "$archive" -d "$scratch/restore" || die "$source is not a readable ZIP."
+restore="$scratch/restore"
+[[ -f $restore/identity.db ]] || die "$source contains no identity.db."
+check="$(sqlite3 "$restore/identity.db" "PRAGMA integrity_check")"
+[[ $check == ok ]] || die "The database in $source is damaged: $check"
+if [[ $with_config == 1 ]]; then
+    [[ -f $restore/etc/identity/identity.env && -d $restore/etc/identity/keys ]] ||
+        die "$source contains no certificates and settings."
+fi
+
+echo "Users in the backup: $(sqlite3 "$restore/identity.db" "SELECT count(*) FROM AspNetUsers" 2>/dev/null || echo '?')"
+if [[ $yes != 1 ]]; then
+    what="the database $db"
+    [[ $with_config == 1 ]] && what+=" and the certificates and settings in $CONF_DIR"
+    read -rp "Replace $what with $(basename "$source")? [y/N] " answer
+    [[ $answer == [yYjJ]* ]] || die "Cancelled."
+fi
+
+# No backup or update may run in between: both use these locks.
+exec 8>/run/identity-backup.lock 9>/run/identity-update.lock
+{ flock -w 600 8 && flock -w 600 9; } || die "A backup or update is still running."
+
+stamp="$(date +%Y%m%d-%H%M%S)"
+previous="$db.before-restore-$stamp"
+previous_config="/root/identity-config-before-restore-$stamp"
+healthy() {
+    for _ in $(seq 1 30); do
+        curl -fs -o /dev/null http://127.0.0.1:8080/health && return 0
+        sleep 2
+    done
+    return 1
+}
+
+systemctl stop identity
+if [[ -f $db ]]; then
+    # As the service user, so SQLite leaves no root-owned files next to the database.
+    runuser -u identity -- sqlite3 "$db" ".backup '$previous'"
+    chmod 640 "$previous"
+    echo "Current database kept as $previous"
+fi
+install -o identity -g identity -m 640 "$restore/identity.db" "$db"
+rm -f "$db-wal" "$db-shm"
+
+if [[ $with_config == 1 ]]; then
+    mkdir -p "$previous_config"
+    cp -a "$CONF_DIR/identity.env" "$CONF_DIR/keys" "$previous_config/"
+    echo "Current settings kept in $previous_config"
+    issuer="$(setting Server__Issuer "$CONF_DIR/identity.env")"
+    old_issuer="$(setting Server__Issuer "$restore/etc/identity/identity.env")"
+    rm -rf "$CONF_DIR/keys"
+    cp -a "$restore/etc/identity/keys" "$restore/etc/identity/identity.env" "$CONF_DIR/"
+    if [[ -n $issuer ]]; then
+        sed -i "s#^Server__Issuer=.*#Server__Issuer=$issuer#" "$CONF_DIR/identity.env"
+        [[ $issuer == "$old_issuer" ]] ||
+            echo "Kept Server__Issuer=$issuer (the backup had $old_issuer); clients may need the new address."
+    fi
+    chown -R root:identity "$CONF_DIR/keys" "$CONF_DIR/identity.env"
+    chmod 640 "$CONF_DIR/identity.env" "$CONF_DIR"/keys/*
+fi
+
+systemctl start identity
+if healthy; then
+    echo "Restored $(basename "$source")."
+    exit 0
+fi
+
+echo "The server does not come up with the restored state, putting the previous one back." >&2
+journalctl -u identity -n 20 --no-pager >&2 || true
+systemctl stop identity
+if [[ -f $previous ]]; then
+    install -o identity -g identity -m 640 "$previous" "$db"
+    rm -f "$db-wal" "$db-shm"
+fi
+if [[ $with_config == 1 ]]; then
+    rm -rf "$CONF_DIR/keys"
+    cp -a "$previous_config/keys" "$previous_config/identity.env" "$CONF_DIR/"
+fi
+systemctl start identity
+exit 1
+EOF
+chmod 755 /usr/local/bin/identity-restore
+
 # Root only: holds the Nextcloud app password. Values given to this script replace the file,
 # otherwise an existing one is kept.
 if [[ -n $NEXTCLOUD_WEBDAV_URL || -n $NEXTCLOUD_USERNAME || -n $NEXTCLOUD_APP_PASSWORD || ! -f $CONF_DIR/backup.env ]]; then
@@ -511,6 +672,7 @@ if [[ $AUTO_UPDATE == 1 ]]; then
     echo "Updates:   new commits on $REPO_BRANCH are deployed every $UPDATE_INTERVAL (journalctl -u identity-update)"
 fi
 echo "Update now: identity-update"
+echo "Restore:   identity-restore --list, then identity-restore <archive>"
 if [[ -n $(sed -n 's/^NEXTCLOUD_APP_PASSWORD=//p' "$CONF_DIR/backup.env") ]]; then
     echo "Backup:    every night at $BACKUP_AT to Nextcloud (journalctl -u identity-backup), now: identity-backup"
 else
