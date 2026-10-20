@@ -32,6 +32,13 @@ GIT_TOKEN="${GIT_TOKEN:-}"                    # only for a private repository
 AUTO_UPDATE="${AUTO_UPDATE:-1}"               # 1: deploy new commits on REPO_BRANCH automatically
 UPDATE_INTERVAL="${UPDATE_INTERVAL:-15min}"   # how often to check (systemd time span)
 
+# Nightly backup to a Nextcloud folder over WebDAV; off while the three values are missing.
+NEXTCLOUD_WEBDAV_URL="${NEXTCLOUD_WEBDAV_URL:-}" # e.g. https://cloud.example.de/remote.php/dav/files/<user>/Backups/identity
+NEXTCLOUD_USERNAME="${NEXTCLOUD_USERNAME:-}"
+NEXTCLOUD_APP_PASSWORD="${NEXTCLOUD_APP_PASSWORD:-}" # app password (Nextcloud: Settings > Security > Devices & sessions)
+BACKUP_PASSPHRASE="${BACKUP_PASSPHRASE:-}"       # optional: encrypt the archives with this passphrase
+BACKUP_AT="${BACKUP_AT:-03:00}"                  # start time of the nightly backup (local time of the container)
+
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
@@ -113,7 +120,7 @@ apt-get update -q
 apt-get install -y -q software-properties-common
 add-apt-repository -y universe >/dev/null
 apt-get update -q
-apt-get install -y -q ca-certificates curl git jq openssl sqlite3 dotnet-sdk-10.0
+apt-get install -y -q ca-certificates curl git jq openssl sqlite3 zip unzip dotnet-sdk-10.0
 
 log "Installing Tailscale"
 if ! command -v tailscale >/dev/null; then
@@ -350,6 +357,141 @@ else
     systemctl disable --now identity-update.timer 2>/dev/null || true
 fi
 
+log "Setting up the Nextcloud backup"
+systemd-analyze calendar "*-*-* $BACKUP_AT" >/dev/null || { echo "BACKUP_AT=$BACKUP_AT is not a time like 03:00." >&2; exit 1; }
+cat >/usr/local/bin/identity-backup <<'EOF'
+#!/usr/bin/env bash
+# Backs up the identity server to a Nextcloud folder over WebDAV, like fil-o-mat: a copy of the SQLite
+# database through SQLite's online backup (consistent while the server writes) plus the keys and settings
+# from /etc/identity, packed as a ZIP. Each run uploads two archives: identity-mon.zip ... identity-sun.zip
+# (the last seven days) and identity-2026-10.zip (the last state of each month). Nothing is deleted there.
+# Access in /etc/identity/backup.env: NEXTCLOUD_WEBDAV_URL, NEXTCLOUD_USERNAME, NEXTCLOUD_APP_PASSWORD,
+# optionally BACKUP_PASSPHRASE (archives are then encrypted with AES-256 and named *.zip.enc).
+set -euo pipefail
+CONF_DIR=/etc/identity
+
+# Read as plain KEY=value lines, so passwords with $ or quotes need no escaping.
+setting() { if [[ -f $2 ]]; then sed -n "s/^$1=//p" "$2" | tail -n1; fi; }
+url="${NEXTCLOUD_WEBDAV_URL:-$(setting NEXTCLOUD_WEBDAV_URL "$CONF_DIR/backup.env")}"
+user="${NEXTCLOUD_USERNAME:-$(setting NEXTCLOUD_USERNAME "$CONF_DIR/backup.env")}"
+password="${NEXTCLOUD_APP_PASSWORD:-$(setting NEXTCLOUD_APP_PASSWORD "$CONF_DIR/backup.env")}"
+passphrase="${BACKUP_PASSPHRASE:-$(setting BACKUP_PASSPHRASE "$CONF_DIR/backup.env")}"
+if [[ -z $url || -z $user || -z $password ]]; then
+    echo "Nextcloud backup is off: NEXTCLOUD_WEBDAV_URL, NEXTCLOUD_USERNAME and NEXTCLOUD_APP_PASSWORD are missing in $CONF_DIR/backup.env."
+    exit 0
+fi
+url="${url%/}"
+
+provider="$(setting Database__Provider "$CONF_DIR/identity.env")"
+[[ ${provider:-Sqlite} == Sqlite ]] || { echo "Only SQLite is backed up, the server uses $provider." >&2; exit 1; }
+db="$(setting ConnectionStrings__Identity "$CONF_DIR/identity.env" | sed -n 's/.*Data Source=\([^;]*\).*/\1/p')"
+db="${db:-/var/lib/identity/identity.db}"
+[[ -f $db ]] || { echo "Database $db not found." >&2; exit 1; }
+
+exec 9>/run/identity-backup.lock
+flock -n 9 || { echo "Another backup is running."; exit 0; }
+
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+chown identity:identity "$scratch"
+# As the service user, so SQLite never leaves root-owned -wal or -shm files next to the database.
+runuser -u identity -- sqlite3 "$db" ".timeout 30000" ".backup '$scratch/identity.db'"
+check="$(sqlite3 "$scratch/identity.db" "PRAGMA integrity_check")"
+[[ $check == ok ]] || { echo "The copy of the database is damaged: $check" >&2; exit 1; }
+
+# The keys belong to the database: the encryption certificate protects the cookie keys stored in it.
+# source.env (git token) and backup.env (this access) stay out.
+mkdir -p "$scratch/etc/identity"
+cp -a "$CONF_DIR/identity.env" "$CONF_DIR/keys" "$scratch/etc/identity/"
+(cd "$scratch" && zip -q -r -9 identity.zip identity.db etc)
+archive="$scratch/identity.zip" extension=zip
+if [[ -n $passphrase ]]; then
+    BACKUP_PASSPHRASE="$passphrase" openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+        -in "$archive" -out "$archive.enc" -pass env:BACKUP_PASSPHRASE
+    archive="$archive.enc" extension=zip.enc
+fi
+
+# Credentials go to curl on stdin, not on the command line where ps would show them.
+webdav() {
+    local method=$1 target=$2
+    shift 2
+    printf 'user = "%s"\n' "$(printf '%s:%s' "$user" "$password" | sed 's/[\\"]/\\&/g')" |
+        curl -sS -K - -o /dev/null -w '%{http_code}' --connect-timeout 30 --max-time 300 -X "$method" "$@" "$target"
+}
+
+status="$(webdav MKCOL "$url/")" || { echo "Nextcloud does not respond ($url)." >&2; exit 1; }
+case $status in
+    201 | 405) ;; # 405: the folder exists
+    401) echo "Nextcloud rejects the user or the app password (401)." >&2; exit 1 ;;
+    409) echo "The folder above the backup folder is missing in Nextcloud (409): ${url%/*}" >&2; exit 1 ;;
+    *) echo "Cannot create the backup folder $url (HTTP $status)." >&2; exit 1 ;;
+esac
+
+day="$(LC_ALL=C date +%a)"
+bytes="$(stat -c %s "$archive")"
+for name in "identity-${day,,}.$extension" "identity-$(date +%Y-%m).$extension"; do
+    status="$(webdav PUT "$url/$name" -H 'Content-Type: application/octet-stream' --data-binary "@$archive")" ||
+        { echo "Nextcloud does not respond ($url)." >&2; exit 1; }
+    case $status in
+        201 | 204) echo "Uploaded $name ($bytes bytes)" ;;
+        401) echo "Nextcloud rejects the user or the app password (401)." >&2; exit 1 ;;
+        423) echo "Nextcloud keeps $name locked (423)." >&2; exit 1 ;;
+        507) echo "Nextcloud is full (507)." >&2; exit 1 ;;
+        *) echo "Cannot upload $name (HTTP $status)." >&2; exit 1 ;;
+    esac
+done
+EOF
+chmod 755 /usr/local/bin/identity-backup
+
+# Root only: holds the Nextcloud app password. Values given to this script replace the file,
+# otherwise an existing one is kept.
+if [[ -n $NEXTCLOUD_WEBDAV_URL || -n $NEXTCLOUD_USERNAME || -n $NEXTCLOUD_APP_PASSWORD || ! -f $CONF_DIR/backup.env ]]; then
+    install -m 600 /dev/null "$CONF_DIR/backup.env"
+    cat >"$CONF_DIR/backup.env" <<EOF
+# Nightly backup to Nextcloud (identity-backup). The folder is created, the one above it must exist.
+NEXTCLOUD_WEBDAV_URL=$NEXTCLOUD_WEBDAV_URL
+NEXTCLOUD_USERNAME=$NEXTCLOUD_USERNAME
+NEXTCLOUD_APP_PASSWORD=$NEXTCLOUD_APP_PASSWORD
+# Optional: encrypt the archives (keep the passphrase outside this container, e.g. in a password manager).
+BACKUP_PASSPHRASE=$BACKUP_PASSPHRASE
+EOF
+elif [[ -n $BACKUP_PASSPHRASE ]]; then
+    sed -i '/^BACKUP_PASSPHRASE=/d' "$CONF_DIR/backup.env"
+    echo "BACKUP_PASSPHRASE=$BACKUP_PASSPHRASE" >>"$CONF_DIR/backup.env"
+fi
+
+cat >/etc/systemd/system/identity-backup.service <<'EOF'
+[Unit]
+Description=Back up the identity server to Nextcloud
+After=network-online.target
+Wants=network-online.target
+# A failed run is retried every 30 minutes, at most three times.
+StartLimitIntervalSec=6h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/identity-backup
+Restart=on-failure
+RestartSec=30min
+PrivateTmp=true
+EOF
+cat >/etc/systemd/system/identity-backup.timer <<EOF
+[Unit]
+Description=Nightly backup of the identity server to Nextcloud
+
+[Timer]
+OnCalendar=*-*-* $BACKUP_AT
+# Catches up on a run missed while the container was off.
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now identity-backup.timer
+
 log "Publishing over Tailscale"
 if [[ $TS_FUNNEL == 1 ]]; then
     tailscale funnel --bg http://127.0.0.1:8080
@@ -369,7 +511,11 @@ if [[ $AUTO_UPDATE == 1 ]]; then
     echo "Updates:   new commits on $REPO_BRANCH are deployed every $UPDATE_INTERVAL (journalctl -u identity-update)"
 fi
 echo "Update now: identity-update"
-echo "Backup:    sqlite3 /var/lib/identity/identity.db \".backup /root/identity-backup.db\""
+if [[ -n $(sed -n 's/^NEXTCLOUD_APP_PASSWORD=//p' "$CONF_DIR/backup.env") ]]; then
+    echo "Backup:    every night at $BACKUP_AT to Nextcloud (journalctl -u identity-backup), now: identity-backup"
+else
+    echo "Backup:    off, add the Nextcloud access to $CONF_DIR/backup.env, then test with: identity-backup"
+fi
 PROVISION_EOF
 
 pct push "$CTID" "$PROVISION" /root/provision-identity.sh --perms 700
@@ -379,6 +525,8 @@ pct exec "$CTID" -- env \
     CT_HOSTNAME="$CT_HOSTNAME" TS_AUTHKEY="$TS_AUTHKEY" TS_FUNNEL="$TS_FUNNEL" \
     ADMIN_EMAIL="$ADMIN_EMAIL" REPO_URL="$REPO_URL" REPO_BRANCH="$REPO_BRANCH" GIT_TOKEN="$GIT_TOKEN" \
     AUTO_UPDATE="$AUTO_UPDATE" UPDATE_INTERVAL="$UPDATE_INTERVAL" \
+    NEXTCLOUD_WEBDAV_URL="$NEXTCLOUD_WEBDAV_URL" NEXTCLOUD_USERNAME="$NEXTCLOUD_USERNAME" \
+    NEXTCLOUD_APP_PASSWORD="$NEXTCLOUD_APP_PASSWORD" BACKUP_PASSPHRASE="$BACKUP_PASSPHRASE" BACKUP_AT="$BACKUP_AT" \
     bash /root/provision-identity.sh ||
     die "Setup of container $CTID stopped. Fix the cause and run the script again with CTID=$CTID to continue."
 

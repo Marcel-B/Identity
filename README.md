@@ -120,6 +120,8 @@ TS_AUTHKEY=tskey-auth-… ADMIN_EMAIL=du@example.com bash create-lxc.sh
 | `ADMIN_EMAIL` | `admin@example.com` | Erster Admin; das Passwort wird erzeugt und am Ende einmal angezeigt |
 | `REPO_URL`, `REPO_BRANCH`, `GIT_TOKEN` | dieses Repo, `main`, – | Quelle; Token nur für private Repos |
 | `AUTO_UPDATE`, `UPDATE_INTERVAL` | `1`, `15min` | Neue Commits auf `REPO_BRANCH` automatisch bereitstellen, und wie oft geprüft wird |
+| `NEXTCLOUD_WEBDAV_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_APP_PASSWORD` | – | Nächtliche Sicherung in die Nextcloud, siehe unten |
+| `BACKUP_PASSPHRASE`, `BACKUP_AT` | –, `03:00` | Sicherungen damit verschlüsseln; Uhrzeit der Sicherung |
 
 Bricht die Einrichtung ab, das Skript mit derselben `CTID` erneut starten: Der vorhandene Container wird weiter eingerichtet, Schlüssel, Einstellungen und Datenbank bleiben erhalten. Genauso bekommt ein bestehender Container neue Funktionen des Skripts, etwa die automatischen Updates.
 
@@ -128,7 +130,37 @@ Im Container:
 - Automatische Updates: Ein systemd-Timer prüft alle `UPDATE_INTERVAL`, ob es auf `REPO_BRANCH` einen neuen Commit gibt, baut ihn und startet den Server neu. Schlägt der Build fehl, läuft die alte Version weiter; wird die neue nach dem Neustart nicht gesund (`/health`), stellt das Skript die vorherige wieder her. Ein fehlgeschlagener Commit wird erst mit dem nächsten Commit erneut versucht. Logs: `journalctl -u identity-update`, abschalten: `systemctl disable --now identity-update.timer`
 - Sofort aktualisieren: `identity-update`
 - Logs: `journalctl -u identity -f`
-- Backup: `sqlite3 /var/lib/identity/identity.db ".backup /root/identity-backup.db"`, dazu `/etc/identity` sichern (Zertifikate)
+- Sicherung: jede Nacht in die Nextcloud (siehe unten), sofort: `identity-backup`, Logs: `journalctl -u identity-backup`
+
+### Sicherung in die Nextcloud
+
+Jede Nacht um `BACKUP_AT` (Standard 3 Uhr, Zeit des Containers) kopiert `identity-backup` die Datenbank über SQLites Online-Backup (stimmig, auch wenn der Server gerade schreibt), packt sie mit den Zertifikaten und `identity.env` aus `/etc/identity` als ZIP und lädt sie per WebDAV in einen Nextcloud-Ordner, wie im fil-o-mat. Die Zertifikate gehören dazu, weil das Verschlüsselungszertifikat die Cookie-Schlüssel in der Datenbank schützt und ohne das Signaturzertifikat alle ausgegebenen Tokens ungültig wären. `source.env` (Git-Token) und `backup.env` (der Nextcloud-Zugang) bleiben draußen.
+
+Es entstehen `identity-mon.zip` … `identity-sun.zip` (die letzten sieben Tage) und `identity-2026-10.zip` (der letzte Stand jedes Monats); in der Nextcloud wird nichts gelöscht. Schlägt eine Sicherung fehl, versucht systemd es nach 30 Minuten erneut, höchstens dreimal. Ohne Nextcloud-Zugang läuft der Timer, tut aber nichts.
+
+Einrichten: in der Nextcloud unter Einstellungen > Sicherheit > Geräte & Sitzungen ein App-Passwort anlegen, dann das Skript mit derselben `CTID` erneut starten:
+
+```bash
+CTID=<CTID> NEXTCLOUD_WEBDAV_URL=https://cloud.example.de/remote.php/dav/files/<benutzer>/Backups/identity \
+  NEXTCLOUD_USERNAME=<benutzer> NEXTCLOUD_APP_PASSWORD=<app-passwort> bash create-lxc.sh
+```
+
+Oder im Container die Werte in `/etc/identity/backup.env` eintragen. Der Ordner `identity` wird angelegt, der darüber (`Backups`) muss existieren. Zum Prüfen im Container `identity-backup` aufrufen.
+
+Die Archive enthalten private Schlüssel, deren Passwort, TOTP-Geheimnisse und Passwort-Hashes. Mit `BACKUP_PASSPHRASE` werden sie mit AES-256 verschlüsselt (`identity-mon.zip.enc`); die Passphrase dann außerhalb des Containers aufheben, etwa im Passwortmanager.
+
+Zurückspielen im Container (Archiv in `/root`, verschlüsselt vorher entschlüsseln):
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in identity-mon.zip.enc -out identity-mon.zip  # nur bei .enc
+unzip identity-mon.zip -d /root/restore
+systemctl stop identity
+install -o identity -g identity -m 640 /root/restore/identity.db /var/lib/identity/identity.db
+rm -f /var/lib/identity/identity.db-wal /var/lib/identity/identity.db-shm
+# Nur in einem neuen Container: Zertifikate und Einstellungen übernehmen, danach Server__Issuer prüfen
+cp -a /root/restore/etc/identity/. /etc/identity/ && chown -R root:identity /etc/identity/keys /etc/identity/identity.env
+systemctl start identity
+```
 
 ## Anbindung einer Anwendung (ASP.NET Core)
 
