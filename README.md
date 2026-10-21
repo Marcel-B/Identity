@@ -129,8 +129,9 @@ Im Container:
 - Einstellungen in `/etc/identity/identity.env` (z.B. SMTP, externe Logins), danach `systemctl restart identity`
 - Automatische Updates: Ein systemd-Timer prüft alle `UPDATE_INTERVAL`, ob es auf `REPO_BRANCH` einen neuen Commit gibt, baut ihn und startet den Server neu. Schlägt der Build fehl, läuft die alte Version weiter; wird die neue nach dem Neustart nicht gesund (`/health`), stellt das Skript die vorherige wieder her. Ein fehlgeschlagener Commit wird erst mit dem nächsten Commit erneut versucht. Logs: `journalctl -u identity-update`, abschalten: `systemctl disable --now identity-update.timer`
 - Sofort aktualisieren: `identity-update`
+- Eine Shell über `pct enter` hat `/usr/local/bin` nicht im `PATH`; dort `identity-update`, `identity-backup` und `identity-restore` mit vollem Pfad aufrufen (`/usr/local/bin/identity-backup`) oder vorher `export PATH=$PATH:/usr/local/bin`
 - Logs: `journalctl -u identity -f`
-- Sicherung: jede Nacht in die Nextcloud (siehe unten), sofort: `identity-backup`, Logs: `journalctl -u identity-backup`
+- Sicherung: jede Nacht in die Nextcloud (siehe unten), sofort: `identity-backup`, Logs: `journalctl -u identity-backup`, zurückspielen: `identity-restore`
 
 ### Sicherung in die Nextcloud
 
@@ -149,18 +150,17 @@ Oder im Container die Werte in `/etc/identity/backup.env` eintragen. Der Ordner 
 
 Die Archive enthalten private Schlüssel, deren Passwort, TOTP-Geheimnisse und Passwort-Hashes. Mit `BACKUP_PASSPHRASE` werden sie mit AES-256 verschlüsselt (`identity-mon.zip.enc`); die Passphrase dann außerhalb des Containers aufheben, etwa im Passwortmanager.
 
-Zurückspielen im Container (Archiv in `/root`, verschlüsselt vorher entschlüsseln):
+Zurückspielen im Container mit `identity-restore`:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in identity-mon.zip.enc -out identity-mon.zip  # nur bei .enc
-unzip identity-mon.zip -d /root/restore
-systemctl stop identity
-install -o identity -g identity -m 640 /root/restore/identity.db /var/lib/identity/identity.db
-rm -f /var/lib/identity/identity.db-wal /var/lib/identity/identity.db-shm
-# Nur in einem neuen Container: Zertifikate und Einstellungen übernehmen, danach Server__Issuer prüfen
-cp -a /root/restore/etc/identity/. /etc/identity/ && chown -R root:identity /etc/identity/keys /etc/identity/identity.env
-systemctl start identity
+identity-restore --list                  # Archive in der Nextcloud anzeigen
+identity-restore identity-mon.zip        # aus der Nextcloud holen und die Datenbank ersetzen
+identity-restore /root/identity-mon.zip  # oder aus einer lokalen Datei (.zip oder .zip.enc)
 ```
+
+Das Skript prüft das Archiv, fragt nach (`--yes` überspringt das), hält den Server an, ersetzt die Datenbank und startet ihn wieder. Die bisherige Datenbank bleibt als `identity.db.before-restore-<zeit>` daneben liegen. Wird der Server mit dem eingespielten Stand nicht gesund (`/health`), stellt das Skript die bisherige wieder her. Verschlüsselte Archive entschlüsselt es mit `BACKUP_PASSPHRASE` aus `backup.env`, sonst fragt es nach der Passphrase.
+
+In einem **neuen** Container zusätzlich `--with-config` angeben: Dann kommen auch die Zertifikate und `identity.env` aus dem Archiv zurück, damit ausgegebene Tokens und Anmelde-Cookies gültig bleiben. `Server__Issuer` des neuen Containers bleibt erhalten; weicht er von der Sicherung ab, sagt das Skript Bescheid, und die Clients brauchen die neue Adresse. Die bisherigen Einstellungen liegen danach in `/root/identity-config-before-restore-<zeit>`. Den Nextcloud-Zugang dafür gibt man beim Anlegen mit (siehe oben), sonst das Archiv vorher nach `/root` kopieren.
 
 ## Anbindung einer Anwendung (ASP.NET Core)
 
