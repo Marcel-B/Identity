@@ -129,6 +129,7 @@ Im Container:
 - Einstellungen in `/etc/identity/identity.env` (z.B. SMTP, externe Logins), danach `systemctl restart identity`
 - Automatische Updates: Ein systemd-Timer prüft alle `UPDATE_INTERVAL`, ob es auf `REPO_BRANCH` einen neuen Commit gibt, baut ihn und startet den Server neu. Schlägt der Build fehl, läuft die alte Version weiter; wird die neue nach dem Neustart nicht gesund (`/health`), stellt das Skript die vorherige wieder her. Ein fehlgeschlagener Commit wird erst mit dem nächsten Commit erneut versucht. Logs: `journalctl -u identity-update`, abschalten: `systemctl disable --now identity-update.timer`
 - Sofort aktualisieren: `identity-update`
+- Eine Shell über `pct enter` hat `/usr/local/bin` nicht im `PATH`; dort `identity-update`, `identity-backup` und `identity-restore` mit vollem Pfad aufrufen (`/usr/local/bin/identity-backup`) oder vorher `export PATH=$PATH:/usr/local/bin`
 - Logs: `journalctl -u identity -f`
 - Sicherung: jede Nacht in die Nextcloud (siehe unten), sofort: `identity-backup`, Logs: `journalctl -u identity-backup`, zurückspielen: `identity-restore`
 

@@ -45,6 +45,11 @@ die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "Run as root on the Proxmox host."
 command -v pct >/dev/null || die "pct not found. This script must run on a Proxmox VE host."
 
+if [[ -n $NEXTCLOUD_WEBDAV_URL ]]; then
+    [[ $NEXTCLOUD_WEBDAV_URL =~ ^https?://[^/]+/ && $NEXTCLOUD_WEBDAV_URL != *://*://* ]] ||
+        die "NEXTCLOUD_WEBDAV_URL must be a WebDAV folder like https://cloud.example.de/remote.php/dav/files/<user>/Backups/identity."
+fi
+
 case $TS_AUTHKEY in
     "" | tskey-auth-*) ;;
     tskey-api-*) die "TS_AUTHKEY is an API access token. Create an auth key instead: Tailscale admin console > Settings > Keys > Generate auth key (tskey-auth-...)." ;;
@@ -381,6 +386,8 @@ if [[ -z $url || -z $user || -z $password ]]; then
     exit 0
 fi
 url="${url%/}"
+[[ $url =~ ^https?://[^/]+/ && $url != *://*://* ]] ||
+    { echo "NEXTCLOUD_WEBDAV_URL=$url is no WebDAV folder like https://cloud.example.de/remote.php/dav/files/<user>/Backups/identity." >&2; exit 1; }
 
 provider="$(setting Database__Provider "$CONF_DIR/identity.env")"
 [[ ${provider:-Sqlite} == Sqlite ]] || { echo "Only SQLite is backed up, the server uses $provider." >&2; exit 1; }
@@ -482,14 +489,19 @@ passphrase="${BACKUP_PASSPHRASE:-$(setting BACKUP_PASSPHRASE "$CONF_DIR/backup.e
 url="${url%/}"
 
 # Credentials go to curl on stdin, not on the command line where ps would show them.
-webdav() {
+need_access() {
     [[ -n $url && -n $user && -n $password ]] ||
         die "No Nextcloud access in $CONF_DIR/backup.env; pass the path of a local archive instead."
+    [[ $url =~ ^https?://[^/]+/ && $url != *://*://* ]] ||
+        die "NEXTCLOUD_WEBDAV_URL=$url is no WebDAV folder like https://cloud.example.de/remote.php/dav/files/<user>/Backups/identity."
+}
+webdav() {
     printf 'user = "%s"\n' "$(printf '%s:%s' "$user" "$password" | sed 's/[\\"]/\\&/g')" |
         curl -sS -K - --connect-timeout 30 --max-time 300 "$@"
 }
 
 if [[ $list == 1 ]]; then
+    need_access
     webdav -f -X PROPFIND -H 'Depth: 1' "$url/" |
         grep -o '<d:href>[^<]*</d:href>' | sed 's#.*/\([^/<]*\)</d:href>#\1#' |
         grep -E '^identity-.*\.zip(\.enc)?$' | sort || die "No archives found in $url."
@@ -508,6 +520,7 @@ if [[ -f $source ]]; then
     cp "$source" "$archive"
 else
     [[ $source != */* ]] || die "$source not found."
+    need_access
     echo "Downloading $source"
     webdav -f -o "$archive" "$url/$source" || die "Cannot download $source from $url (identity-restore --list shows the archives)."
 fi
