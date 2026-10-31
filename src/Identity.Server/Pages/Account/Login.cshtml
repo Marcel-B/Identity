@@ -5,6 +5,7 @@
 }
 <div class="card">
     <h1>Anmelden</h1>
+    <p class="lead">Melde dich mit deinem Konto an, um fortzufahren.</p>
     <form method="post" id="login-form">
         <div asp-validation-summary="ModelOnly"></div>
         <input type="hidden" asp-for="ReturnUrl" />
@@ -31,7 +32,7 @@
     @if (Model.ExternalProviders.Count > 0)
     {
         <p class="divider">oder weiter mit</p>
-        <form method="post" asp-controller="ExternalLogin" asp-action="Challenge" class="actions">
+        <form method="post" asp-controller="ExternalLogin" asp-action="Challenge" class="actions stacked">
             <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
             @foreach (var provider in Model.ExternalProviders)
             {
@@ -40,7 +41,7 @@
         </form>
     }
 
-    <div class="actions">
+    <div class="links">
         <a asp-page="./ForgotPassword">Passwort vergessen?</a>
         @if (Model.AllowRegistration)
         {

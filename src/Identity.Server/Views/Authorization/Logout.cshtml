@@ -3,8 +3,11 @@
     ViewData["Title"] = "Abmelden";
 }
 <div class="card">
+    <div class="card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></svg>
+    </div>
     <h1>Abmelden?</h1>
-    <p>Möchtest du dich abmelden?</p>
+    <p class="lead">Möchtest du dich abmelden?</p>
     <form method="post" asp-controller="Authorization" asp-action="LogoutPost">
         @foreach (var parameter in Model)
         {
@@ -13,6 +16,6 @@
                 <input type="hidden" name="@parameter.Key" value="@value" />
             }
         }
-        <button type="submit">Abmelden</button>
+        <button type="submit" class="block">Abmelden</button>
     </form>
 </div>

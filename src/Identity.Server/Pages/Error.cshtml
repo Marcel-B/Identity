@@ -4,11 +4,16 @@
     ViewData["Title"] = "Fehler";
 }
 <div class="card">
+    <div class="card-icon danger" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+    </div>
     <h1>@Model.Title</h1>
-    <p>@Model.Description</p>
+    <p class="lead">@Model.Description</p>
     @if (Model.RequestId is not null)
     {
         <p class="muted">Anfrage-ID: <code>@Model.RequestId</code></p>
     }
-    <a href="~/">Zur Startseite</a>
+    <div class="actions">
+        <a class="button secondary" href="~/">Zur Startseite</a>
+    </div>
 </div>

@@ -5,6 +5,9 @@
     ViewData["Title"] = "Start";
 }
 <div class="card">
+    <div class="card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+    </div>
     @if (SignInManager.IsSignedIn(User))
     {
         <h1>Hallo @(User.Identity?.Name)</h1>
@@ -14,7 +17,8 @@
     {
         <h1>Willkommen</h1>
         <p>Dies ist der Anmeldedienst. Anwendungen leiten dich zur Anmeldung hierher weiter.</p>
-        <a class="button" asp-page="/Account/Login">Anmelden</a>
+        <div class="actions stacked">
+            <a class="button" asp-page="/Account/Login">Anmelden</a>
+        </div>
     }
 </div>
-<p class="muted">OpenID-Connect-Konfiguration: <a href="~/.well-known/openid-configuration">/.well-known/openid-configuration</a></p>
