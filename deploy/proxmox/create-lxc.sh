@@ -39,6 +39,9 @@ NEXTCLOUD_APP_PASSWORD="${NEXTCLOUD_APP_PASSWORD:-}" # app password (Nextcloud: 
 BACKUP_PASSPHRASE="${BACKUP_PASSPHRASE:-}"       # optional: encrypt the archives with this passphrase
 BACKUP_AT="${BACKUP_AT:-03:00}"                  # start time of the nightly backup (local time of the container)
 
+# Monitoring: /metrics on its own port 9464, reachable only in the tailnet; logs to Loki when LOKI_URL is set.
+LOKI_URL="${LOKI_URL:-}"                         # e.g. http://monitoring:3100
+
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
@@ -171,7 +174,8 @@ if [[ ! -f $CONF_DIR/identity.env ]]; then
     ADMIN_PASSWORD="$(secret)"
     cat >"$CONF_DIR/identity.env" <<EOF
 ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://127.0.0.1:8080
+# 9464 answers nothing but /metrics, published in the tailnet only (never through Funnel).
+ASPNETCORE_URLS=http://127.0.0.1:8080;http://127.0.0.1:9464
 Database__Provider=Sqlite
 ConnectionStrings__Identity=Data Source=/var/lib/identity/identity.db
 
@@ -200,6 +204,9 @@ Seed__Admin__Password=$ADMIN_PASSWORD
 # Sign-in with external accounts (redirect URI: ${ISSUER}callback/login/github etc.)
 #ExternalProviders__GitHub__ClientId=
 #ExternalProviders__GitHub__ClientSecret=
+
+# Log lines to Loki (warnings of OpenIddict, everything of the server; mails written to the log never).
+$( [[ -n $LOKI_URL ]] && echo "Monitoring__Loki__Url=$LOKI_URL" || echo "#Monitoring__Loki__Url=http://monitoring:3100" )
 EOF
     chmod 640 "$CONF_DIR/identity.env"
     chown root:identity "$CONF_DIR/identity.env"
@@ -447,6 +454,8 @@ for name in "identity-${day,,}.$extension" "identity-$(date +%Y-%m).$extension";
         *) echo "Cannot upload $name (HTTP $status)." >&2; exit 1 ;;
     esac
 done
+# Read by the server for identity_backup_last_success_timestamp_seconds.
+date +%s >/var/lib/identity/backup-last-success
 EOF
 chmod 755 /usr/local/bin/identity-backup
 
@@ -672,6 +681,8 @@ if [[ $TS_FUNNEL == 1 ]]; then
 else
     tailscale serve --bg http://127.0.0.1:8080
 fi
+# Metrics for Prometheus, in the tailnet only: Funnel stays on 443.
+tailscale serve --bg --http=9464 http://127.0.0.1:9464
 
 log "Done"
 echo "Issuer:    $ISSUER"
@@ -686,6 +697,7 @@ if [[ $AUTO_UPDATE == 1 ]]; then
 fi
 echo "Update now: identity-update"
 echo "Restore:   identity-restore --list, then identity-restore <archive>"
+echo "Metrics:   http://$CT_HOSTNAME:9464/metrics (tailnet only), logs to Loki: ${LOKI_URL:-off}"
 if [[ -n $(sed -n 's/^NEXTCLOUD_APP_PASSWORD=//p' "$CONF_DIR/backup.env") ]]; then
     echo "Backup:    every night at $BACKUP_AT to Nextcloud (journalctl -u identity-backup), now: identity-backup"
 else
@@ -702,6 +714,7 @@ pct exec "$CTID" -- env \
     AUTO_UPDATE="$AUTO_UPDATE" UPDATE_INTERVAL="$UPDATE_INTERVAL" \
     NEXTCLOUD_WEBDAV_URL="$NEXTCLOUD_WEBDAV_URL" NEXTCLOUD_USERNAME="$NEXTCLOUD_USERNAME" \
     NEXTCLOUD_APP_PASSWORD="$NEXTCLOUD_APP_PASSWORD" BACKUP_PASSPHRASE="$BACKUP_PASSPHRASE" BACKUP_AT="$BACKUP_AT" \
+    LOKI_URL="$LOKI_URL" \
     bash /root/provision-identity.sh ||
     die "Setup of container $CTID stopped. Fix the cause and run the script again with CTID=$CTID to continue."
 

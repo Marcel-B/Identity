@@ -1,12 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace Identity.Server.Pages.Account;
 
-public sealed class LoginWith2faModel(SignInManager<ApplicationUser> signInManager) : PageModel
+public sealed class LoginWith2faModel(SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager) : PageModel
 {
     [BindProperty]
     [Required(ErrorMessage = "Bitte gib den Code ein.")]
@@ -39,13 +40,16 @@ public sealed class LoginWith2faModel(SignInManager<ApplicationUser> signInManag
             return Page();
         }
 
-        if (await signInManager.GetTwoFactorAuthenticationUserAsync() is null)
+        if (await signInManager.GetTwoFactorAuthenticationUserAsync() is not { } user)
         {
             return RedirectToPage("./Login");
         }
 
+        var wasLockedOut = await userManager.IsLockedOutAsync(user);
+
         var code = Code.Replace(" ", string.Empty).Replace("-", string.Empty);
         var result = await signInManager.TwoFactorAuthenticatorSignInAsync(code, RememberMe, RememberMachine);
+        IdentityMetrics.SecondFactor("totp", result, wasLockedOut);
 
         if (result.Succeeded)
         {

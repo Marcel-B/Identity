@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Identity.Server.Options;
 using Identity.Server.Services;
 using Microsoft.AspNetCore.Identity;
@@ -69,6 +70,7 @@ public sealed class RegisterModel(
         };
 
         var result = await userManager.CreateAsync(user, Input.Password);
+        IdentityMetrics.Registrations.WithLabels(result.Succeeded ? "success" : "failed").Inc();
         if (!result.Succeeded)
         {
             foreach (var error in result.Errors)

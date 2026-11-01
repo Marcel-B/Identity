@@ -55,6 +55,7 @@ Alle Einstellungen gehen auch als Umgebungsvariablen, z.B. `Server__Issuer` oder
 | `Database:Provider` | `Sqlite` (Standard) oder `Postgres` |
 | `ConnectionStrings:Identity` | z.B. `Data Source=/var/lib/identity/identity.db` oder `Host=…;Database=identity;Username=…;Password=…` |
 | `Server` | `Issuer` (öffentliche URL), `DisplayName`, `AllowRegistration`, `RequireConfirmedEmail`, `RequireHttps`, `UseForwardedHeaders` (hinter Reverse Proxy), `MigrateDatabaseOnStartup`, `CorsOrigins` (Origins von SPAs, die Token- und Discovery-Endpunkte direkt aufrufen, z.B. `Server__CorsOrigins__0=https://app.example`) |
+| `Monitoring` | `MetricsPort` (Standard `9464`, einziger Port für `/metrics`, `0` schaltet ab), `Loki:Url` (Logs an Loki, leer heißt aus), `Loki:Host`, `BackupStampFile`, siehe [Überwachung](#überwachung) |
 | `Keys` | Zertifikate für Signatur und Verschlüsselung (siehe unten) |
 | `Seed` | Erster Admin, Rollen, Scopes und Clients. Wird nur angelegt, wenn es fehlt; Änderungen aus der Verwaltung bleiben erhalten |
 | `ExternalProviders` | `GitHub`, `Google`, `Microsoft` mit `ClientId`/`ClientSecret` (Microsoft zusätzlich `Tenant`). Ein Anbieter ist aktiv, sobald er eine Client-ID hat |
@@ -122,6 +123,7 @@ TS_AUTHKEY=tskey-auth-… ADMIN_EMAIL=du@example.com bash create-lxc.sh
 | `AUTO_UPDATE`, `UPDATE_INTERVAL` | `1`, `15min` | Neue Commits auf `REPO_BRANCH` automatisch bereitstellen, und wie oft geprüft wird |
 | `NEXTCLOUD_WEBDAV_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_APP_PASSWORD` | – | Nächtliche Sicherung in die Nextcloud, siehe unten |
 | `BACKUP_PASSPHRASE`, `BACKUP_AT` | –, `03:00` | Sicherungen damit verschlüsseln; Uhrzeit der Sicherung |
+| `LOKI_URL` | – | Logs an Loki, z.B. `http://monitoring:3100`, siehe [Überwachung](#überwachung) |
 
 Bricht die Einrichtung ab, das Skript mit derselben `CTID` erneut starten: Der vorhandene Container wird weiter eingerichtet, Schlüssel, Einstellungen und Datenbank bleiben erhalten. Genauso bekommt ein bestehender Container neue Funktionen des Skripts, etwa die automatischen Updates.
 
@@ -161,6 +163,29 @@ identity-restore /root/identity-mon.zip  # oder aus einer lokalen Datei (.zip od
 Das Skript prüft das Archiv, fragt nach (`--yes` überspringt das), hält den Server an, ersetzt die Datenbank und startet ihn wieder. Die bisherige Datenbank bleibt als `identity.db.before-restore-<zeit>` daneben liegen. Wird der Server mit dem eingespielten Stand nicht gesund (`/health`), stellt das Skript die bisherige wieder her. Verschlüsselte Archive entschlüsselt es mit `BACKUP_PASSPHRASE` aus `backup.env`, sonst fragt es nach der Passphrase.
 
 In einem **neuen** Container zusätzlich `--with-config` angeben: Dann kommen auch die Zertifikate und `identity.env` aus dem Archiv zurück, damit ausgegebene Tokens und Anmelde-Cookies gültig bleiben. `Server__Issuer` des neuen Containers bleibt erhalten; weicht er von der Sicherung ab, sagt das Skript Bescheid, und die Clients brauchen die neue Adresse. Die bisherigen Einstellungen liegen danach in `/root/identity-config-before-restore-<zeit>`. Den Nextcloud-Zugang dafür gibt man beim Anlegen mit (siehe oben), sonst das Archiv vorher nach `/root` kopieren.
+
+### Überwachung
+
+Der Server liefert Messwerte für Prometheus unter `/metrics`, aber nur auf einem eigenen Port (`Monitoring:MetricsPort`, Standard 9464). Dieser Port beantwortet nichts anderes, und die übrigen Ports beantworten `/metrics` nicht; maßgeblich ist der Port der Verbindung, nicht der Host-Header. `create-lxc.sh` lässt Kestrel zusätzlich auf `127.0.0.1:9464` lauschen und gibt den Port mit `tailscale serve --http=9464` nur im Tailnet frei. Funnel bleibt auf 443, `/metrics` kommt also nie ins Internet.
+
+| Name | Art | Labels |
+| --- | --- | --- |
+| `identity_sign_ins_total` | Zähler | `method` (`password`, `passkey`, `external_github`, `external_google`, `external_microsoft`), `result` (`success`, `failed`, `locked_out`, `two_factor_required`, `not_allowed`) |
+| `identity_two_factor_total` | Zähler | `kind` (`totp`, `recovery`), `result` |
+| `identity_lockouts_total` | Zähler | – (nur der Versuch, der ein Konto sperrt) |
+| `identity_registrations_total` | Zähler | `result` (`success`, `failed`), Registrierung und neue Konten über externe Anmeldung |
+| `identity_tokens_issued_total` | Zähler | `grant` (`authorization_code`, `refresh_token`, `client_credentials`, `other`) |
+| `identity_token_errors_total` | Zähler | `error` (`invalid_grant`, `invalid_client`, `invalid_request`, `unauthorized_client`, `other`) |
+| `identity_users` | Gauge | `state` (`active`, `locked`, `unconfirmed`), höchstens alle 5 Minuten gezählt |
+| `identity_clients` | Gauge | – |
+| `identity_backup_last_success_timestamp_seconds` | Gauge | – (aus `/var/lib/identity/backup-last-success`, das `identity-backup` nach jedem Erfolg schreibt) |
+| `identity_loki_lines_pushed_total`, `identity_loki_lines_dropped_total` | Zähler | `reason` beim Verwerfen |
+
+Dazu kommen die Anfragen (`http_requests_received_total`, `http_request_duration_seconds` von prometheus-net), die Prozesswerte von .NET und die Instrumente, die ASP.NET Core Identity selbst misst (`microsoft_aspnetcore_identity_…`). Kein Label enthält Benutzer, E-Mail-Adressen, Client-IDs oder IP-Adressen.
+
+Mit `Monitoring:Loki:Url` (im Container `Monitoring__Loki__Url` in `identity.env`) gehen die Log-Zeilen zusätzlich an Loki, mit den Labels `app=identity`, `host`, `level` und `source` (`account`, `admin`, `oidc`, `external`, `server`). OpenIddict schickt nur Warnungen und Fehler, das Journal behält alles. Mails, die ohne SMTP-Server ins Log geschrieben werden, gehen nie an Loki, weil sie Bestätigungs- und Rücksetzlinks enthalten. Ist Loki nicht erreichbar, werden die Zeilen verworfen statt gestaut.
+
+Einen Container, der vor der Überwachung angelegt wurde, stellt `deploy/proxmox/monitoring-einrichten.sh` um (auf dem Proxmox-Host als root, sobald die Änderung auf `main` ist): Port 9464 in `ASPNETCORE_URLS` und im Tailnet, `Monitoring__Loki__Url` (Standard `http://monitoring:3100`), der Zeitstempel in `identity-backup`, danach `identity-update` und eine Prüfung. Am Ende druckt es die Zeile, mit der das Ziel im Monitoring-Container eingetragen wird.
 
 ## Anbindung einer Anwendung (ASP.NET Core)
 

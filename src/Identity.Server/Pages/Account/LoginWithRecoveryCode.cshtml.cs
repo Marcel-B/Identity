@@ -1,12 +1,13 @@
 using System.ComponentModel.DataAnnotations;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace Identity.Server.Pages.Account;
 
-public sealed class LoginWithRecoveryCodeModel(SignInManager<ApplicationUser> signInManager) : PageModel
+public sealed class LoginWithRecoveryCodeModel(SignInManager<ApplicationUser> signInManager, UserManager<ApplicationUser> userManager) : PageModel
 {
     [BindProperty]
     [Required(ErrorMessage = "Bitte gib einen Wiederherstellungscode ein.")]
@@ -26,12 +27,15 @@ public sealed class LoginWithRecoveryCodeModel(SignInManager<ApplicationUser> si
             return Page();
         }
 
-        if (await signInManager.GetTwoFactorAuthenticationUserAsync() is null)
+        if (await signInManager.GetTwoFactorAuthenticationUserAsync() is not { } user)
         {
             return RedirectToPage("./Login");
         }
 
+        var wasLockedOut = await userManager.IsLockedOutAsync(user);
+
         var result = await signInManager.TwoFactorRecoveryCodeSignInAsync(RecoveryCode.Replace(" ", string.Empty));
+        IdentityMetrics.SecondFactor("recovery", result, wasLockedOut);
         if (result.Succeeded)
         {
             return LocalRedirect(ReturnUrl is not null && Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/");

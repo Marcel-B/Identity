@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Identity.Server.Services;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -21,6 +22,11 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     public const string ClientSecret = "test-secret";
     public const string SpaOrigin = "https://spa.example";
 
+    /// <summary>Requests carry this header to arrive on another port than the server's main one (8080).</summary>
+    public const string PortHeader = "X-Test-Local-Port";
+
+    public const int MetricsPort = 9464;
+
     private static readonly bool UsePostgres =
         string.Equals(Environment.GetEnvironmentVariable("IDENTITY_TEST_DATABASE"), "Postgres", StringComparison.OrdinalIgnoreCase);
 
@@ -31,6 +37,8 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     private readonly string _database = $"identity_test_{Guid.NewGuid():N}";
 
     private string SqlitePath => Path.Combine(Path.GetTempPath(), $"{_database}.db");
+
+    public string BackupStampPath => Path.Combine(Path.GetTempPath(), $"{_database}.backup-last-success");
 
     public CapturingEmailSender Emails { get; } = new();
 
@@ -59,6 +67,9 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
             ["Server:RequireHttps"] = "false",
             ["Server:RequireConfirmedEmail"] = "true",
             ["Server:CorsOrigins:0"] = SpaOrigin,
+            ["Monitoring:MetricsPort"] = MetricsPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["Monitoring:BackupStampFile"] = BackupStampPath,
+            ["Monitoring:CountsCacheTime"] = "00:00:00",
             ["Seed:Admin:Email"] = AdminEmail,
             ["Seed:Admin:Password"] = AdminPassword,
             ["Seed:Roles:0"] = "user",
@@ -92,6 +103,9 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
         {
             services.RemoveAll<IEmailSender>();
             services.AddSingleton<IEmailSender>(Emails);
+
+            // The test server has no ports; this one stands in for the port a connection came in on.
+            services.AddSingleton<IStartupFilter, LocalPortFilter>();
         });
     }
 
@@ -101,6 +115,7 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     {
         await base.DisposeAsync();
 
+        File.Delete(BackupStampPath);
         if (!UsePostgres)
         {
             SqliteConnection.ClearAllPools();
@@ -118,6 +133,19 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
         await using var command = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{_database}\" WITH (FORCE)", connection);
         await command.ExecuteNonQueryAsync();
     }
+}
+
+internal sealed class LocalPortFilter : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use((context, nextMiddleware) =>
+        {
+            context.Connection.LocalPort = int.TryParse(context.Request.Headers[IdentityServerFactory.PortHeader], out var port) ? port : 8080;
+            return nextMiddleware(context);
+        });
+        next(app);
+    };
 }
 
 public sealed class CapturingEmailSender : IEmailSender
