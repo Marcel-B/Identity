@@ -70,8 +70,11 @@ if [[ $RESUME == 1 ]]; then
 else
     log "Fetching the Ubuntu 24.04 template"
     pveam update >/dev/null
-    TEMPLATE="$(pveam available --section system | awk '/ubuntu-24.04-standard/ {print $2}' | sort -V | tail -n1)"
-    [[ -n $TEMPLATE ]] || die "No ubuntu-24.04-standard template available."
+    # Proxmox lists templates for amd64 and arm64; unfiltered, arm64 sorts last and fails to start on x86.
+    ARCH="$(dpkg --print-architecture)"
+    TEMPLATE="$(pveam available --section system |
+        awk -v a="_$ARCH.tar" '$2 ~ /^ubuntu-24\.04-standard_/ && index($2, a) {print $2}' | sort -V | tail -n1)"
+    [[ -n $TEMPLATE ]] || die "No ubuntu-24.04-standard template for $ARCH available."
     if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
         pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
     fi
