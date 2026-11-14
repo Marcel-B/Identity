@@ -69,7 +69,7 @@ public sealed class DatabaseInitializer(
         }
 
         EnsureSucceeded(await users.AddToRoleAsync(user, AdminRole), $"admin role for '{admin.Email}'");
-        logger.LogInformation("Created administrator {Email}", admin.Email);
+        logger.LogInformation("Created administrator {UserId}", user.Id);
     }
 
     private static async Task SeedScopesAsync(IOpenIddictScopeManager scopes, SeedOptions seed, CancellationToken cancellationToken)

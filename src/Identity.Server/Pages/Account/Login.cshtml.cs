@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Identity.Server.Options;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -57,10 +58,12 @@ public sealed class LoginModel(
         var user = await userManager.FindByNameAsync(Input.Login) ?? await userManager.FindByEmailAsync(Input.Login);
         if (user is null)
         {
+            IdentityMetrics.SignIn(IdentityMetrics.Methods.Password, Microsoft.AspNetCore.Identity.SignInResult.Failed);
             ModelState.AddModelError(string.Empty, "Benutzername oder Passwort ist falsch.");
             return Page();
         }
 
+        var wasLockedOut = await userManager.IsLockedOutAsync(user);
         var result = await signInManager.PasswordSignInAsync(user, Input.Password, Input.RememberMe, lockoutOnFailure: true);
 
         // Identity refuses unconfirmed accounts before it checks the password. Only tell people with the
@@ -70,6 +73,7 @@ public sealed class LoginModel(
             result = Microsoft.AspNetCore.Identity.SignInResult.Failed;
         }
 
+        IdentityMetrics.SignIn(IdentityMetrics.Methods.Password, result, wasLockedOut);
         return await HandleResultAsync(result, user);
     }
 
@@ -83,6 +87,7 @@ public sealed class LoginModel(
         }
 
         var result = await signInManager.PasskeySignInAsync(PasskeyCredential);
+        IdentityMetrics.SignIn(IdentityMetrics.Methods.Passkey, result);
         return await HandleResultAsync(result, user: null);
     }
 

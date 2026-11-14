@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Identity.Server.Options;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -59,6 +60,7 @@ public sealed class ExternalLoginController(
         if (!result.Succeeded || result.Principal is not { } principal)
         {
             logger.LogWarning(result.Failure, "External login failed.");
+            IdentityMetrics.SignIn(IdentityMetrics.Methods.External(RouteData.Values["provider"] as string), Microsoft.AspNetCore.Identity.SignInResult.Failed);
             return LoginError("Die Anmeldung beim externen Anbieter ist fehlgeschlagen.");
         }
 
@@ -78,7 +80,14 @@ public sealed class ExternalLoginController(
             return await LinkAsync(linkUserId, provider, providerKey);
         }
 
+        var method = IdentityMetrics.Methods.External(provider);
         var signIn = await signInManager.ExternalLoginSignInAsync(provider, providerKey, isPersistent: false, bypassTwoFactor: false);
+        if (signIn.Succeeded || signIn.RequiresTwoFactor || signIn.IsLockedOut)
+        {
+            // External sign-ins never count as failed attempts, so a locked account was locked before.
+            IdentityMetrics.SignIn(method, signIn, wasLockedOut: true);
+        }
+
         if (signIn.Succeeded)
         {
             return LocalRedirect(returnUrl);
@@ -96,16 +105,19 @@ public sealed class ExternalLoginController(
 
         if (await userManager.FindByLoginAsync(provider, providerKey) is not null)
         {
+            IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.NotAllowed);
             return LoginError("Dieses Konto darf sich derzeit nicht anmelden.");
         }
 
         if (!serverOptions.Value.AllowRegistration)
         {
+            IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.Failed);
             return LoginError("Für dieses externe Konto gibt es kein Benutzerkonto.");
         }
 
         if (string.IsNullOrEmpty(email))
         {
+            IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.Failed);
             return LoginError("Der externe Anbieter hat keine E-Mail-Adresse geliefert.");
         }
 
@@ -113,6 +125,7 @@ public sealed class ExternalLoginController(
         // external account could take over a local one.
         if (await userManager.FindByEmailAsync(email) is not null)
         {
+            IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.Failed);
             return LoginError(
                 $"Es gibt schon ein Konto mit {email}. Melde dich damit an und verknüpfe {provider} unter \"Mein Konto\".");
         }
@@ -135,11 +148,15 @@ public sealed class ExternalLoginController(
 
         if (!created.Succeeded)
         {
+            IdentityMetrics.Registrations.WithLabels("failed").Inc();
+            IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.Failed);
             return LoginError(string.Join(" ", created.Errors.Select(error => error.Description)));
         }
 
         logger.LogInformation("Created user {UserId} from {Provider} login.", user.Id, provider);
+        IdentityMetrics.Registrations.WithLabels("success").Inc();
         await signInManager.SignInAsync(user, isPersistent: false, authenticationMethod: provider);
+        IdentityMetrics.SignIn(method, Microsoft.AspNetCore.Identity.SignInResult.Success);
         return LocalRedirect(returnUrl);
     }
 

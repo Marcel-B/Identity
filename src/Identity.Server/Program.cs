@@ -2,6 +2,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Encodings.Web;
 using System.Text.Unicode;
 using Identity.Server.Data;
+using Identity.Server.Monitoring;
 using Identity.Server.Options;
 using Identity.Server.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -9,11 +10,14 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.WebEncoders;
+using OpenIddict.Server;
+using Prometheus;
 using Quartz;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
+builder.AddMonitoring();
 
 var serverOptions = configuration.GetSection(ServerOptions.SectionName).Get<ServerOptions>() ?? new();
 var keyOptions = configuration.GetSection(KeyOptions.SectionName).Get<KeyOptions>() ?? new();
@@ -134,6 +138,23 @@ builder.Services.AddOpenIddict()
 
         // Resource servers validate plain signed JWTs, like with any other OpenID Connect provider.
         options.DisableAccessTokenEncryption();
+
+        // Every answer of the token endpoint passes here, issued tokens and refusals alike, before it is written.
+        options.AddEventHandler<OpenIddictServerEvents.ApplyTokenResponseContext>(handler => handler
+            .UseInlineHandler(context =>
+            {
+                if (context.Response.Error is { } error)
+                {
+                    IdentityMetrics.TokenErrors.WithLabels(IdentityMetrics.ErrorOf(error)).Inc();
+                }
+                else if (context.Response.AccessToken is not null)
+                {
+                    IdentityMetrics.TokensIssued.WithLabels(IdentityMetrics.GrantOf(context.Request?.GrantType)).Inc();
+                }
+
+                return default;
+            })
+            .SetOrder(int.MinValue + 100_000));
 
         TokenKeys.Configure(keyOptions, builder.Environment,
             certificate => options.AddSigningCertificate(certificate),
@@ -263,6 +284,8 @@ if (serverOptions.UseForwardedHeaders)
 
 var app = builder.Build();
 
+app.UseMetricsPort();
+
 if (serverOptions.UseForwardedHeaders)
 {
     app.UseForwardedHeaders();
@@ -280,6 +303,7 @@ if (!app.Environment.IsDevelopment())
 app.UseStatusCodePagesWithReExecute("/Error", "?code={0}");
 app.UseStaticFiles();
 app.UseRouting();
+app.UseHttpMetrics();
 
 // Before authentication: OpenIddict answers discovery, token and userinfo requests in the authentication middleware.
 if (corsOrigins.Length > 0)
@@ -295,6 +319,7 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapRazorPages();
 app.MapHealthChecks("/health");
+app.MapMetrics();
 
 app.Run();
 
