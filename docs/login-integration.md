@@ -196,6 +196,15 @@ curl -s -X POST "$IDENTITY_AUTHORITY/connect/token" \
 
 Das Token hat `sub` = Client-ID, `name` = Anzeigename des Clients und `aud` = Ressource des Scopes. Keine Rollen, kein Refresh Token.
 
+### MCP-Client (Resource Indicator)
+
+MCP-Clients (Claude Code u. a.) schicken beim Login und beim Token-Abruf `resource=<URL des MCP-Servers>` mit (RFC 8707). Der Server nimmt eine Ressource an, wenn sie als absolute URL unter „Ressourcen / Audiences“ eines API-Scopes steht, den der Client anfragen darf. Für einen neuen MCP-Server also:
+
+1. Beim API-Scope des Dienstes (z. B. `gate-o-mat-api`) die URL des MCP-Endpunkts als weitere Ressource eintragen, z. B. `https://dienst.tail6105c0.ts.net/mcp`. Sie landet dann zusätzlich in `aud`.
+2. Den MCP-Client als Public Client mit PKCE anlegen, mit der Redirect-URI des Clients (Claude Code: `http://localhost:<Port>/callback`) und dem API-Scope.
+
+Steht die URL nirgends oder fehlt dem Client der Scope, antwortet der Server mit `invalid_target`.
+
 ## Was im Token steht
 
 | Claim | Access Token | ID Token | UserInfo |
@@ -237,6 +246,7 @@ Eigene lokale Clients im Admin unter `http://localhost:5001/Admin/Clients` anleg
 | `invalid_scope` | Scope ist dem Client nicht erlaubt oder existiert nicht (API-Scope im Admin anlegen und dem Client zuweisen) |
 | `unauthorized_client` | Grant Type beim Client nicht aktiviert (z.B. `refresh_token` fehlt bei `offline_access`) |
 | `invalid_client` | Falsches Secret, oder Public Client schickt ein Secret mit bzw. vertraulicher Client keins |
+| `invalid_target` | `resource`-Parameter (MCP-Client) steht unter keinem API-Scope des Clients; URL beim Scope als Ressource eintragen |
 | `consent_required` | Client steht auf `explicit` und es wurde `prompt=none` verwendet |
 | API antwortet 401, Token sieht gut aus | `aud` passt nicht (API-Scope nicht angefragt) oder `typ: at+jwt` wird abgelehnt |
 | Rollen fehlen in `User.IsInRole` | `MapInboundClaims` nicht ausgeschaltet oder `RoleClaimType` nicht auf `role` gesetzt |

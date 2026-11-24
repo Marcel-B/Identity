@@ -139,6 +139,13 @@ builder.Services.AddOpenIddict()
         // Resource servers validate plain signed JWTs, like with any other OpenID Connect provider.
         options.DisableAccessTokenEncryption();
 
+        // Resource indicators (MCP clients send one): allowed when listed under a scope the client may request,
+        // checked by ResourceIndicators instead of OpenIddict's static registration and rsrc: permissions.
+        options.DisableResourceValidation()
+            .IgnoreResourcePermissions()
+            .AddEventHandler(ResourceIndicators.AuthorizationDescriptor)
+            .AddEventHandler(ResourceIndicators.TokenDescriptor);
+
         // Every answer of the token endpoint passes here, issued tokens and refusals alike, before it is written.
         options.AddEventHandler<OpenIddictServerEvents.ApplyTokenResponseContext>(handler => handler
             .UseInlineHandler(context =>

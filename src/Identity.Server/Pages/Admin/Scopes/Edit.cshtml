@@ -18,6 +18,7 @@
 
         <label asp-for="Input.Resources"></label>
         <textarea asp-for="Input.Resources"></textarea>
+        <p class="muted">Jede Zeile wird Audience im Access Token. Absolute URLs (etwa <code>https://dienst.tail6105c0.ts.net/mcp</code>) dürfen Clients mit diesem Scope zusätzlich als <code>resource</code>-Parameter schicken, wie MCP-Clients es tun.</p>
 
         <div class="actions"><button type="submit">Speichern</button></div>
     </form>

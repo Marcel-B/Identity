@@ -22,6 +22,9 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
     public const string ClientSecret = "test-secret";
     public const string SpaOrigin = "https://spa.example";
 
+    /// <summary>An MCP server URL listed under the mcp-api scope, as a resource indicator.</summary>
+    public const string McpResource = "https://mcp.example/mcp";
+
     /// <summary>Requests carry this header to arrive on another port than the server's main one (8080).</summary>
     public const string PortHeader = "X-Test-Local-Port";
 
@@ -76,12 +79,16 @@ public sealed class IdentityServerFactory : WebApplicationFactory<Program>, IAsy
             ["Seed:Scopes:0:Name"] = "demo-api",
             ["Seed:Scopes:0:DisplayName"] = "Demo API",
             ["Seed:Scopes:0:Resources:0"] = "demo-api",
+            ["Seed:Scopes:1:Name"] = "mcp-api",
+            ["Seed:Scopes:1:Resources:0"] = "mcp-api",
+            ["Seed:Scopes:1:Resources:1"] = McpResource,
 
             ["Seed:Clients:0:ClientId"] = "web",
             ["Seed:Clients:0:ClientSecret"] = ClientSecret,
             ["Seed:Clients:0:RedirectUris:0"] = "https://web.example/signin-oidc",
             ["Seed:Clients:0:PostLogoutRedirectUris:0"] = "https://web.example/signout-callback-oidc",
             ["Seed:Clients:0:Scopes:0"] = "demo-api",
+            ["Seed:Clients:0:Scopes:1"] = "mcp-api",
 
             ["Seed:Clients:1:ClientId"] = "third-party",
             ["Seed:Clients:1:DisplayName"] = "Third Party App",
